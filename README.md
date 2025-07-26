@@ -406,16 +406,3 @@ logging.basicConfig(level=logging.DEBUG)
 
 agent = ReactAgent(verbose=True)
 ```
-
-## 🎉 What's Next?
-
-- [ ] Multi-modal tool support (image, audio)
-- [ ] Distributed multi-agent systems
-- [ ] Fine-tuning capabilities
-- [ ] Integration with external APIs
-- [ ] Performance optimization
-- [ ] Advanced planning algorithms
-
----
-
-Built with ❤️ using LangGraph, LangChain, and Google Gemini
