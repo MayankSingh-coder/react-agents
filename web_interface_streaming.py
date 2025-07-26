@@ -222,7 +222,7 @@ async def run_streaming_chat(chatbot: StreamingChatbot, prompt: str, thinking_di
 
 # Page configuration
 st.set_page_config(
-    page_title="AI Agent - Real-time Thinking",
+    page_title="Octopus Prime Chat Bot Reactive Agent - Real-time Thinking",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -245,8 +245,8 @@ def main():
     """Main Streamlit application."""
     
     # Title and description
-    st.title("🧠 AI Agent with Real-time Thinking")
-    st.markdown("Watch the AI agent think and reason in real-time as it processes your requests!")
+    st.title("🧠 Octopus Prime Chat Bot Reactive Agent with Real-time Thinking")
+    st.markdown("Watch Octopus Prime Chat Bot Reactive Agent think and reason in real-time as it processes your requests!")
     
     # Sidebar
     with st.sidebar:

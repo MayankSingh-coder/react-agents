@@ -32,7 +32,7 @@ async def run_chatbot_safely(chatbot, prompt):
 
 # Page configuration
 st.set_page_config(
-    page_title="Octopus Prime Chatbot",
+    page_title="Octopus Prime Chat Bot Reactive Agent",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -53,8 +53,8 @@ def main():
     """Main Streamlit application."""
     
     # Title and description
-    st.title("🤖 Octopus Prime Chatbot")
-    st.markdown("I am Octopus Prime, your intelligent assistant. I can help you with various tasks and provide information.")
+    st.title("🤖 Octopus Prime Chat Bot Reactive Agent")
+    st.markdown("I am Octopus Prime Chat Bot Reactive Agent, your intelligent assistant. I can help you with various tasks and provide information.")
     
     # Sidebar
     with st.sidebar:
