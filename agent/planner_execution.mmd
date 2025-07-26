@@ -1,0 +1,35 @@
+graph TD
+    START([START]) --> decide_approach[decide_approach]
+    
+    decide_approach --> |route_after_decision| plan[plan]
+    decide_approach --> |route_after_decision| think[think]
+    
+    %% Plan-Execute path
+    plan --> execute[execute]
+    execute --> |should_continue_after_execute| think
+    execute --> |should_continue_after_execute| finish[finish]
+    execute --> |approach_reconsideration| decide_approach
+    
+    %% ReAct path
+    think --> |should_continue_after_think| act[act]
+    think --> |should_continue_after_think| finish
+    
+    %% Adaptive feedback loops from think
+    think --> |strategy_reconsideration| decide_approach
+    think --> |direct_replanning| plan
+    
+    act --> observe[observe]
+    observe --> think
+    
+    finish --> END([END])
+    
+    %% Styling
+    classDef startEnd fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef decision fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef process fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef action fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    
+    class START,END startEnd
+    class decide_approach decision
+    class plan,execute,finish process
+    class think,act,observe action
