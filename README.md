@@ -33,6 +33,48 @@ A sophisticated AI agent system that combines **ReAct (Reasoning and Acting)** a
 - **Context Manager**: Maintains session state and tool interaction history
 - **Memory Store**: Multi-type storage (conversational, episodic, tool-specific)
 
+## 🧠 Adaptive Thinking Flow
+
+The hybrid React Agent features sophisticated adaptive thinking that intelligently switches between different reasoning approaches based on real-time evaluation and learning from past experiences.
+
+### Key Innovation: Dynamic Approach Switching
+- **Intelligent Decision Making**: Uses query complexity analysis and episodic memory similarity to choose optimal approach
+- **Real-time Evaluation**: Continuously assesses execution success and adapts strategy mid-flow
+- **Adaptive Replanning**: Creates new plans when initial execution fails, with intelligent fallback mechanisms
+- **Memory-Informed Learning**: Leverages past episodes to improve decision making over time
+
+### Adaptive Flow Features
+1. **Approach Selection**: Automatically determines whether to use Plan-Execute or ReAct based on:
+    - Query complexity indicators (multiple steps, calculations, comparisons)
+    - Similarity to successful past episodes
+    - Tool usage patterns from historical data
+
+2. **Execution Evaluation**: After plan execution, evaluates:
+    - Success rate (≥70% threshold for completion)
+    - Task completion status
+    - Quality of results
+
+3. **Adaptive Replanning**: When plans fail:
+    - Generates new strategies with different approaches
+    - Can switch from Plan-Execute to ReAct mid-execution
+    - Prevents infinite loops with attempt limits
+    - Graceful degradation to simpler approaches
+
+4. **Seamless Integration**: ReAct and Plan-Execute modes work together:
+    - ReAct serves as fallback for failed plans
+    - Plan-Execute handles complex multi-step reasoning
+    - Memory system learns from both approaches
+
+### Visual Flow & Documentation
+- **[Adaptive React Agent Thinking Flow](./adaptive_react_agent_flowchart.md)**: Detailed Mermaid diagram showing the complete decision and execution flow
+- **[Adaptive Replanning Analysis](./ADAPTIVE_REPLANNING_ANALYSIS.md)**: In-depth analysis of the replanning mechanisms and strategies
+
+### Benefits
+- **Robustness**: Multiple fallback mechanisms prevent complete failures
+- **Efficiency**: Uses the most appropriate approach for each query type
+- **Learning**: Improves over time based on execution history
+- **Flexibility**: Can handle both simple and complex queries effectively
+
 ## 📁 Project Architecture
 
 ```
@@ -190,25 +232,55 @@ asyncio.run(watch_agent_think())
 
 ## 🏗️ Architecture Deep Dive
 
-### Execution Flow (Hybrid Mode)
+### Adaptive Execution Flow (Hybrid Mode)
 ```mermaid
-graph TD
-    START([Query Input]) --> decide[Decide Approach]
-    decide --> |Simple Query| react[ReAct Mode]
-    decide --> |Complex Query| plan[Plan-Execute Mode]
+flowchart TD
+    START([🚀 Query Input]) --> DECIDE{🤔 Decide Approach}
     
-    react --> think[Think]
-    think --> act[Act]
-    act --> observe[Observe]
-    observe --> think
-    think --> finish[Generate Response]
+    %% Decision Logic with Memory Integration
+    DECIDE -->|Complex Query<br/>+ Past Success| PLAN[📋 Plan]
+    DECIDE -->|Simple Query<br/>+ Direct Action| THINK[💭 Think]
     
-    plan --> create_plan[Create Plan]
-    create_plan --> execute[Execute Steps]
-    execute --> |Success| finish
-    execute --> |Failure| react
+    %% Plan-Execute Path with Evaluation
+    PLAN --> EXECUTE[⚡ Execute Plan]
+    EXECUTE --> EVALUATE{📊 Evaluate Execution}
     
-    finish --> END([Response])
+    %% Smart Evaluation Outcomes
+    EVALUATE -->|Success ≥70%<br/>Complete| FINISH([✅ Response])
+    EVALUATE -->|Plan Failed<br/>Replan Needed| REPLAN[🔄 Adaptive Replan]
+    EVALUATE -->|Unsatisfactory<br/>Switch Mode| THINK
+    
+    %% Adaptive Replanning with Strategy Switching
+    REPLAN -->|New Plan<br/>Retry| PLAN
+    REPLAN -->|Switch Strategy<br/>to ReAct| THINK
+    REPLAN -->|Max Attempts<br/>Fallback| THINK
+    REPLAN -->|No Solution<br/>Give Up| FINISH
+    
+    %% Enhanced ReAct Loop
+    THINK -->|Need Action<br/>Continue| ACT[🔧 Act]
+    THINK -->|Complete<br/>or Max Steps| FINISH
+    
+    ACT --> OBSERVE[👁️ Observe]
+    OBSERVE --> THINK
+    
+    %% Memory Integration (shown as influence)
+    MEMORY[(🧠 Episodic<br/>Memory)] -.->|Similarity<br/>Matching| DECIDE
+    MEMORY -.->|Learning<br/>from Episodes| REPLAN
+    
+    %% Styling
+    classDef startEnd fill:#e1f5fe,stroke:#01579b,stroke-width:3px
+    classDef decision fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef planPath fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef reactPath fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef adaptive fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef memory fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px
+    
+    class START,FINISH startEnd
+    class DECIDE,EVALUATE decision
+    class PLAN,EXECUTE planPath
+    class THINK,ACT,OBSERVE reactPath
+    class REPLAN adaptive
+    class MEMORY memory
 ```
 
 ### Memory Architecture
