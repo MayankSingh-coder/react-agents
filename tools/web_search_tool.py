@@ -12,9 +12,68 @@ class WebSearchTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="web_search",
-            description="Search the web for current information, news, and real-time data"
+            description=self._get_detailed_description()
         )
         self.serper_api_key = Config.SERPER_API_KEY
+    
+    def _get_detailed_description(self) -> str:
+        """Get detailed description with examples for web search operations."""
+        return """Search the web for current information, news, and real-time data using advanced search APIs.
+
+WHAT IT DOES:
+• Searches the internet for up-to-date information
+• Returns relevant web pages, articles, and resources
+• Provides real-time data and current events
+• Finds information not available in static databases
+
+SEARCH TYPES:
+• General Search: Find web pages, articles, documentation
+  Examples: "latest AI developments", "Python programming tutorial"
+  
+• News Search: Current events, breaking news, recent updates
+  Examples: "today's news", "stock market updates", "weather forecast"
+  
+• Technical Information: Documentation, APIs, code examples
+  Examples: "React hooks documentation", "MySQL syntax guide"
+  
+• Product Information: Reviews, comparisons, specifications
+  Examples: "iPhone 15 review", "best laptops 2024"
+
+BEST USE CASES:
+• Current events and breaking news
+• Real-time data (stock prices, weather, sports scores)
+• Recent developments in technology, science, politics
+• Product reviews and comparisons
+• Technical documentation and tutorials
+• Finding specific websites or resources
+
+USAGE EXAMPLES:
+- Current events: "Ukraine war latest news"
+- Technical info: "Docker compose tutorial"
+- Product research: "best electric cars 2024"
+- Real-time data: "Bitcoin price today"
+- Specific searches: "OpenAI GPT-4 capabilities"
+
+SEARCH STRATEGIES:
+• Use specific keywords for better results
+• Include time indicators for recent info ("2024", "latest", "recent")
+• Use quotes for exact phrases: "climate change effects"
+• Add context for ambiguous terms
+• Combine multiple relevant keywords
+
+RETURNED INFORMATION:
+- Page titles and descriptions
+- URLs for full articles
+- Publication dates when available
+- Relevance rankings
+- Related search suggestions
+
+ADVANTAGES OVER OTHER TOOLS:
+• More current than Wikipedia
+• Broader coverage than academic databases
+• Real-time information updates
+• Access to diverse sources and perspectives
+• Technical documentation and tutorials"""
     
     async def execute(self, query: str, **kwargs) -> ToolResult:
         """Execute web search."""

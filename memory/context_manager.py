@@ -35,8 +35,9 @@ class ReasoningStep:
 class ContextManager:
     """Manages context and information flow between tools and reasoning steps."""
     
-    def __init__(self, memory_store: MemoryStore):
+    def __init__(self, memory_store: MemoryStore, episodic_memory=None):
         self.memory_store = memory_store
+        self.episodic_memory = episodic_memory
         self.current_session_id: Optional[str] = None
         self.reasoning_steps: List[ReasoningStep] = []
         self.tool_contexts: Dict[str, List[ToolContext]] = {}
@@ -49,6 +50,8 @@ class ContextManager:
         self.current_session_id = session_id
         self.reasoning_steps = []
         self.tool_contexts = {}
+        
+        # Initialize with current session's initial query
         self.shared_variables = {
             "initial_query": {
                 "value": initial_query,
@@ -56,8 +59,145 @@ class ContextManager:
                 "timestamp": time.time()
             }
         }
+        
+        # Restore relevant context from recent sessions
+        self._restore_recent_context(initial_query)
+        
         self.entity_tracker = {}
         self.dependency_graph = {}
+    
+    def _restore_recent_context(self, current_query: str):
+        """Restore relevant context from recent sessions."""
+        try:
+            # Get recent episodic memories that might contain relevant context
+            recent_episodes = self._get_recent_episodes(limit=3)
+            
+            current_query_lower = current_query.lower()
+            
+            # Restore calculation results if current query is about calculations or results
+            if any(keyword in current_query_lower for keyword in [
+                'calculate', 'calculation', 'previous', 'result', 'computed', 'math', 
+                'last', 'recent', 'what was', 'show me'
+            ]):
+                self._restore_calculation_context(recent_episodes)
+            
+            # Restore database context if query mentions data or database operations
+            if any(keyword in current_query_lower for keyword in [
+                'data', 'database', 'stored', 'saved', 'retrieved', 'get', 'find'
+            ]):
+                self._restore_database_context(recent_episodes)
+            
+            # Restore search context if query mentions search or information
+            if any(keyword in current_query_lower for keyword in [
+                'search', 'information', 'about', 'find', 'look up', 'tell me'
+            ]):
+                self._restore_search_context(recent_episodes)
+                
+        except Exception as e:
+            # Silently fail - context restoration is best effort
+            pass
+    
+    def _get_recent_episodes(self, limit: int = 3) -> List[Dict[str, Any]]:
+        """Get recent episodes from memory."""
+        try:
+            if self.episodic_memory and hasattr(self.episodic_memory, 'episodes'):
+                # Get most recent episodes sorted by timestamp
+                recent_episodes = sorted(
+                    self.episodic_memory.episodes.values(),
+                    key=lambda x: x.timestamp,
+                    reverse=True
+                )[:limit]
+                
+                # Convert Episode objects to dict format
+                return [episode.to_dict() for episode in recent_episodes]
+        except Exception as e:
+            # Silently fail - context restoration is best effort
+            pass
+        return []
+    
+    def _restore_calculation_context(self, recent_episodes: List[Dict[str, Any]]):
+        """Restore calculation-related shared variables from recent episodes."""
+        for episode in recent_episodes:
+            if isinstance(episode, dict) and 'tools_used' in episode:
+                if 'calculator' in episode.get('tools_used', []):
+                    # Extract calculation result from episode
+                    response = episode.get('response', '').strip()
+                    query = episode.get('query', '')
+                    
+                    # Try to extract numeric result
+                    try:
+                        # Handle various numeric formats
+                        numeric_result = None
+                        if response.replace('.', '').replace('-', '').isdigit():
+                            numeric_result = float(response) if '.' in response else int(response)
+                        elif response.endswith('.0'):
+                            numeric_result = int(float(response))
+                        else:
+                            # Try to parse as float
+                            numeric_result = float(response)
+                        
+                        if numeric_result is not None:
+                            self.shared_variables['last_calculation_result'] = {
+                                'value': numeric_result,
+                                'source_tool': 'calculator',
+                                'timestamp': episode.get('timestamp', time.time()),
+                                'from_previous_session': True
+                            }
+                            
+                            # Extract calculation expression from query if possible
+                            calc_expression = "unknown"
+                            if any(op in query for op in ['+', '-', '*', '/', '=', 'calculate']):
+                                calc_expression = query.replace('Calculate ', '').replace('calculate ', '')
+                            
+                            self.shared_variables['last_calculation_expression'] = {
+                                'value': calc_expression,
+                                'source_tool': 'calculator',
+                                'timestamp': episode.get('timestamp', time.time()),
+                                'from_previous_session': True
+                            }
+                            
+                            self.shared_variables['previous_session_calculation'] = {
+                                'value': f"Previous calculation: {calc_expression} = {response}",
+                                'source_tool': 'episodic_memory',
+                                'timestamp': episode.get('timestamp', time.time()),
+                                'from_previous_session': True
+                            }
+                            break
+                    except (ValueError, TypeError):
+                        # If we can't parse as number, still store the textual result
+                        self.shared_variables['previous_session_calculation'] = {
+                            'value': f"Previous calculation result: {response}",
+                            'source_tool': 'episodic_memory',
+                            'timestamp': episode.get('timestamp', time.time()),
+                            'from_previous_session': True
+                        }
+                        break
+    
+    def _restore_database_context(self, recent_episodes: List[Dict[str, Any]]):
+        """Restore database-related shared variables from recent episodes."""
+        for episode in recent_episodes:
+            if isinstance(episode, dict) and 'tools_used' in episode:
+                if any(db_tool in episode.get('tools_used', []) for db_tool in ['database', 'mysql_database']):
+                    self.shared_variables['previous_database_activity'] = {
+                        'value': f"Recent database interaction: {episode.get('query', '')[:100]}...",
+                        'source_tool': 'episodic_memory', 
+                        'timestamp': episode.get('timestamp', time.time()),
+                        'from_previous_session': True
+                    }
+                    break
+    
+    def _restore_search_context(self, recent_episodes: List[Dict[str, Any]]):
+        """Restore search-related shared variables from recent episodes."""
+        for episode in recent_episodes:
+            if isinstance(episode, dict) and 'tools_used' in episode:
+                if any(search_tool in episode.get('tools_used', []) for search_tool in ['web_search', 'wikipedia']):
+                    self.shared_variables['previous_search_activity'] = {
+                        'value': f"Recent search: {episode.get('query', '')[:100]}...",
+                        'source_tool': 'episodic_memory',
+                        'timestamp': episode.get('timestamp', time.time()),
+                        'from_previous_session': True
+                    }
+                    break
     
     async def add_reasoning_step(self, step: ReasoningStep):
         """Add a reasoning step to the current session."""

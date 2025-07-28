@@ -171,12 +171,92 @@ class DatabaseTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="database",
-            description="Query and store data in a cached database with tables. Supports operations: create_table, get, set, delete, list, search, stats"
+            description=self._get_detailed_description()
         )
         self.cache = DatabaseCache()
         
         # Initialize with sample tables and data
         self._initialize_sample_data()
+    
+    def _get_detailed_description(self) -> str:
+        """Get detailed description with examples for database operations."""
+        return """Query and store data in a cached in-memory database with table support.
+
+WHAT IT DOES:
+• Provides in-memory database functionality with table operations
+• Stores and retrieves structured data temporarily
+• Supports basic CRUD operations (Create, Read, Update, Delete)
+• Includes built-in caching with TTL (Time To Live)
+
+AVAILABLE OPERATIONS:
+
+• create_table <table_name> - Create a new table
+  Usage: create_table customers
+  
+• list - List all available tables
+  Usage: list
+  
+• get <table> <record_id> - Retrieve specific record
+  Usage: get users user123
+  
+• set <table> <record_id> <json_data> - Store/update record  
+  Usage: set users user123 {"name": "John", "age": 30}
+  
+• delete <table> <record_id> - Delete specific record
+  Usage: delete users user123
+  
+• search <table> <search_term> - Search within table
+  Usage: search users john
+  
+• search_all <search_term> - Search across all tables
+  Usage: search_all engineering
+  
+• stats - Show database statistics
+  Usage: stats
+
+USAGE EXAMPLES:
+
+Creating and Using Tables:
+1. create_table products
+2. set products item001 {"name": "Laptop", "price": 999, "category": "electronics"}
+3. get products item001
+4. search products laptop
+
+Working with Users:
+- set users emp123 {"name": "Alice Smith", "department": "marketing", "salary": 55000}
+- search users alice
+- delete users emp123
+
+PRE-LOADED SAMPLE DATA:
+• users table: Sample user records with names, emails, roles
+• admin table: Administrator accounts and permissions  
+• sales table: Sales data and transaction records
+
+DATA FORMAT:
+• Records stored as JSON objects
+• Each record has a unique ID within its table
+• Supports nested data structures
+• Automatic timestamp tracking
+
+FEATURES:
+• TTL-based cache expiration (1 hour default)
+• Cross-table search capabilities
+• Statistics and usage monitoring
+• Table-based data organization
+• JSON-based data storage
+
+LIMITATIONS:
+• Data is temporary (in-memory only)
+• No persistence across application restarts
+• Limited to simple query operations
+• No complex joins or relationships
+• Size limits for performance
+
+BEST PRACTICES:
+• Use descriptive table names
+• Keep record IDs unique and meaningful
+• Store related data in the same table
+• Use JSON format for complex data structures"""
     
     def _initialize_sample_data(self):
         """Initialize the cache with sample tables and data."""

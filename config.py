@@ -10,8 +10,8 @@ class Config:
     """Configuration class for the React Agent."""
     
     # API Keys
-    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY","AIzaSyDYT2NOTdgenYFar9xTFS1g_pEvxRKn4Z8")
-    SERPER_API_KEY = os.getenv("SERPER_API_KEY", "96bb499b5fdef5f994186f50b7e0db4e5e73973a")
+    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY","")
+    SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     
     # Model Configuration

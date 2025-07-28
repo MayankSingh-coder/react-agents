@@ -14,8 +14,107 @@ class CppExecutorTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="cpp_executor",
-            description="Execute C++ code snippets. Provide the complete C++ code including headers and main function."
+            description=self._get_detailed_description()
         )
+    
+    def _get_detailed_description(self) -> str:
+        """Get detailed description with examples for C++ code execution."""
+        return """Execute C++ code snippets. Provide complete C++ code including headers and main function.
+
+WHAT IT DOES:
+• Compiles and executes C++ code in a secure environment
+• Returns program output, compilation errors, or runtime errors
+• Supports standard C++ libraries and features
+• Handles both simple programs and complex algorithms
+
+REQUIREMENTS:
+• Must include complete C++ program structure
+• Requires #include statements for used libraries
+• Must have a main() function as entry point
+• Code should be syntactically correct
+
+SUPPORTED FEATURES:
+• Standard C++ libraries (iostream, vector, string, algorithm, etc.)
+• Basic data types and structures
+• Control flow (if/else, loops, switch)
+• Functions and classes
+• STL containers and algorithms
+• Basic file I/O operations
+
+CODE STRUCTURE EXAMPLES:
+
+Simple Hello World:
+```cpp
+#include <iostream>
+using namespace std;
+
+int main() {
+    cout << "Hello, World!" << endl;
+    return 0;
+}
+```
+
+Mathematical Calculation:
+```cpp
+#include <iostream>
+#include <cmath>
+using namespace std;
+
+int main() {
+    double x = 16.0;
+    double result = sqrt(x);
+    cout << "Square root of " << x << " is " << result << endl;
+    return 0;
+}
+```
+
+Working with Vectors:
+```cpp
+#include <iostream>
+#include <vector>
+#include <algorithm>
+using namespace std;
+
+int main() {
+    vector<int> numbers = {5, 2, 8, 1, 9};
+    sort(numbers.begin(), numbers.end());
+    
+    cout << "Sorted numbers: ";
+    for(int num : numbers) {
+        cout << num << " ";
+    }
+    cout << endl;
+    return 0;
+}
+```
+
+USAGE GUIDELINES:
+• Always include necessary header files
+• Use proper C++ syntax and conventions  
+• Include main() function for execution
+• Add output statements to see results
+• Handle potential runtime errors gracefully
+
+COMMON INCLUDES:
+- #include <iostream>     // Input/output operations
+- #include <vector>       // Dynamic arrays
+- #include <string>       // String operations  
+- #include <algorithm>    // STL algorithms
+- #include <cmath>        // Mathematical functions
+- #include <fstream>      // File operations
+
+LIMITATIONS:
+• Execution timeout for infinite loops
+• Limited memory and processing time
+• No access to external files or network
+• Cannot install additional libraries
+• Security restrictions on system calls
+
+COMPILATION & EXECUTION:
+- Uses g++ compiler with standard flags
+- Automatic compilation before execution
+- Returns both compilation and runtime output
+- Error messages for debugging assistance"""
     
     async def execute(self, query: str, **kwargs) -> ToolResult:
         """Execute C++ code and return the result."""

@@ -60,7 +60,7 @@ class ReactAgent:
         self.memory_store = MemoryStore()
         self.vector_memory = VectorMemory()
         self.episodic_memory = EpisodicMemory(self.memory_store, self.vector_memory)
-        self.context_manager = ContextManager(self.memory_store)
+        self.context_manager = ContextManager(self.memory_store, self.episodic_memory)
         
         # Initialize planner and executor for plan-execute mode
         self.planner = Planner(self.memory_store)
@@ -199,7 +199,10 @@ class ReactAgent:
         initial_state["mode"] = self.mode
         
         # Run the graph
-        config = {"configurable": {"thread_id": f"react_agent_{session_id}"}}
+        config = {
+            "configurable": {"thread_id": f"react_agent_{session_id}"},
+            "recursion_limit": 100
+        }
         
         try:
             start_time = time.time()
@@ -312,6 +315,17 @@ class ReactAgent:
             state["thoughts"].append(thought_content)
             state["current_step"] += 1
             
+            # Store reasoning step in context manager
+            from memory.context_manager import ReasoningStep
+            reasoning_step = ReasoningStep(
+                step_number=state["current_step"],
+                thought=thought_content,
+                planned_action=action_match.group(1).lower() if action_match else None,
+                action_input=action_input_match.group(1).strip() if action_input_match else None,
+                confidence=0.7  # Default confidence
+            )
+            await self.context_manager.add_reasoning_step(reasoning_step)
+            
             # If action is specified, prepare for action
             if action_match:
                 action_name = action_match.group(1).lower()
@@ -368,6 +382,19 @@ class ReactAgent:
             
             # Store important results in context memory for session persistence
             await self._store_result_in_context(action_name, action_input, result, state)
+            
+            # Store tool context in memory system
+            from memory.context_manager import ToolContext
+            tool_context = ToolContext(
+                tool_name=action_name,
+                input_data=action_input,
+                output_data=result.data if result.success else None,
+                success=result.success,
+                error_message=result.error if not result.success else None,
+                execution_time=0.0,  # Could be measured if needed
+                metadata=result.metadata if hasattr(result, 'metadata') else {}
+            )
+            await self.context_manager.add_tool_context(tool_context)
             
             return state
             
@@ -651,16 +678,28 @@ Begin!"""
             # Search episodic memory for similar past interactions
             if hasattr(self, 'episodic_memory'):
                 try:
-                    similar_episodes = await self.episodic_memory.find_similar_episodes(state['input'], top_k=3)
+                    similar_episodes = await self.episodic_memory.find_similar_episodes(state['input'], top_k=5)
                     if similar_episodes:
-                        context_parts.append("\nSimilar Past Interactions:")
+                        context_parts.append("\nSimilar Past Interactions (use these to help answer the current query):")
                         for episode, similarity in similar_episodes:
-                            if similarity > 0.3:  # Only include reasonably similar episodes
-                                context_parts.append(f"  Query: {episode.query}")
-                                context_parts.append(f"  Response: {episode.response}")
-                                context_parts.append(f"  Tools used: {', '.join(episode.tools_used)}")
-                                context_parts.append(f"  Similarity: {similarity:.2f}")
-                                context_parts.append("")
+                            if similarity > 0.2:  # Lower threshold to include more episodes
+                                # For calculation queries, include specific calculation results
+                                if any(keyword in state['input'].lower() for keyword in ['calculate', 'calculation', 'previous', 'result', 'math']):
+                                    context_parts.append(f"  Previous Query: {episode.query}")
+                                    context_parts.append(f"  Previous Result: {episode.response}")
+                                    context_parts.append(f"  Tools used: {', '.join(episode.tools_used)}")
+                                    # Extract calculation details if available
+                                    if 'calculator' in episode.tools_used:
+                                        for step in episode.reasoning_steps:
+                                            if isinstance(step, dict) and 'action' in step and step['action'] == 'calculator':
+                                                context_parts.append(f"  Calculation: {step.get('input', 'N/A')} = {episode.response}")
+                                                break
+                                    context_parts.append("")
+                                else:
+                                    context_parts.append(f"  Query: {episode.query}")
+                                    context_parts.append(f"  Response: {episode.response}")
+                                    context_parts.append(f"  Tools used: {', '.join(episode.tools_used)}")
+                                    context_parts.append("")
                 except Exception as ep_error:
                     if self.verbose:
                         print(f"⚠️ Warning: Failed to get episodic memory: {str(ep_error)}")

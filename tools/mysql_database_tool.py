@@ -133,10 +133,56 @@ class MySQLDatabaseTool(BaseTool):
     def __init__(self, host: str, database: str, user: str, password: str, port: int = 3306):
         super().__init__(
             name="mysql_database",
-            description="Query and manage data in a MySQL database. Supports operations: list_tables, get, set, delete, search, stats, create_table, describe"
+            description=self._get_detailed_description()
         )
         self.mysql = MySQLConnection(host, database, user, password, port)
         self._connect_to_database()
+    
+    def _get_detailed_description(self) -> str:
+        """Get detailed description with examples for all operations."""
+        return """Query and manage data in a MySQL database. 
+
+OPERATIONS & SYNTAX:
+• list_tables - List all tables
+  Usage: list_tables
+
+• describe <table> - Show table structure  
+  Usage: describe users
+  
+• get <table> [conditions] - Retrieve data
+  Usage: get users
+  Usage: get users id=1
+  Usage: get users * 10 (limit 10 records)
+  
+• set <table> <json_data> - Insert new record
+  Usage: set users {"name": "John", "email": "john@email.com", "age": 25}
+  ⚠️  IMPORTANT: Data must be valid JSON object with double quotes
+  
+• update <table> <json_data> WHERE <condition> - Update records
+  Usage: update users {"name": "Jane"} WHERE id=1
+  
+• delete <table> WHERE <condition> - Delete records  
+  Usage: delete users WHERE id=1
+  
+• search <table> <column> <value> - Search records
+  Usage: search users name John
+  
+• stats - Show database statistics
+  Usage: stats
+  
+• create_table <table_name> (<columns>) - Create table
+  Usage: create_table users (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100), age INT)
+
+• sql <query> - Execute custom SQL
+  Usage: sql SELECT * FROM users WHERE age > 18
+
+• help - Show detailed usage information
+  Usage: help
+
+COMMON ERRORS:
+- JSON parsing error → Check JSON format in 'set' command
+- Table doesn't exist → Use 'list_tables' first  
+- Syntax error → Check examples above"""
     
     def _connect_to_database(self):
         """Initialize connection to MySQL database."""
@@ -179,11 +225,13 @@ class MySQLDatabaseTool(BaseTool):
                 return await self._create_table_operation_improved(query)
             elif operation == "custom_query" or operation == "sql":
                 return await self._custom_query_operation(parts[1:])
+            elif operation == "help":
+                return await self._help_operation()
             else:
                 return ToolResult(
                     success=False,
                     data=None,
-                    error=f"Unknown operation: {operation}. Supported: list_tables, describe, get, set, update, delete, search, stats, create_table, sql"
+                    error=f"Unknown operation: {operation}. Supported: list_tables, describe, get, set, update, delete, search, stats, create_table, sql, help. Use 'help' for detailed usage information."
                 )
         
         except Exception as e:
@@ -340,7 +388,7 @@ class MySQLDatabaseTool(BaseTool):
             return ToolResult(
                 success=False,
                 data=None,
-                error=f"Invalid JSON data: {str(e)}"
+                error=f"Invalid JSON data: {str(e)}. Example format: set {table_name} {{\"column1\": \"value1\", \"column2\": \"value2\"}}. Use double quotes for both keys and string values. Use 'mysql_database help' for more examples."
             )
         
         # Build INSERT query
@@ -485,58 +533,109 @@ class MySQLDatabaseTool(BaseTool):
         )
     
     async def _search_operation(self, args: List[str]) -> ToolResult:
-        """Handle search operations across tables."""
-        if not args:
+        """Handle search operations. Format: search <table> <column> <value>"""
+        if len(args) < 3:
             return ToolResult(
                 success=False,
                 data=None,
-                error="Search operation requires a search term"
+                error="Search operation requires table name, column name, and search value. Usage: search <table> <column> <value>"
             )
         
-        search_term = " ".join(args)
-        tables = self.mysql.get_table_names()
-        results = {}
+        table_name = args[0]
+        column_name = args[1]
+        search_value = " ".join(args[2:])  # Join remaining args as search value
         
-        for table_name in tables:
-            try:
-                schema = self.mysql.get_table_schema(table_name)
-                
-                # Build search conditions for text columns
-                search_conditions = []
-                for column in schema["columns"]:
-                    col_type = schema["column_types"].get(column, "").lower()
-                    if any(text_type in col_type for text_type in ['varchar', 'text', 'char']):
-                        search_conditions.append(f"{column} LIKE %s")
-                
-                if search_conditions:
-                    where_clause = " OR ".join(search_conditions)
-                    query = f"SELECT * FROM {table_name} WHERE {where_clause}"
-                    search_params = tuple([f"%{search_term}%"] * len(search_conditions))
-                    
-                    success, result, error = self.mysql.execute_query(query, search_params)
-                    
-                    if success and result:
-                        results[table_name] = {
-                            "records": result,
-                            "count": len(result)
-                        }
+        # Check if table exists
+        if not self.mysql.table_exists(table_name):
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"Table '{table_name}' does not exist. Available tables: {', '.join(self.mysql.get_table_names())}"
+            )
+        
+        # Get table schema and validate column
+        try:
+            schema = self.mysql.get_table_schema(table_name)
+            if column_name not in schema["columns"]:
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"Column '{column_name}' does not exist in table '{table_name}'. Available columns: {', '.join(schema['columns'])}"
+                )
             
-            except Exception as e:
-                logger.warning(f"Error searching table {table_name}: {e}")
-                continue
-        
-        total_results = sum(table_data["count"] for table_data in results.values())
-        
-        return ToolResult(
-            success=True,
-            data={
-                "search_term": search_term,
-                "results": results,
-                "total_results": total_results,
-                "tables_searched": list(results.keys())
-            },
-            metadata={"operation": "search", "term": search_term}
-        )
+            # Get column type for appropriate search strategy
+            column_type = schema["column_types"].get(column_name, "").lower()
+            
+            # Build appropriate WHERE clause based on column type
+            if any(text_type in column_type for text_type in ['varchar', 'text', 'char']):
+                # Text column - use LIKE for partial matching
+                query = f"SELECT * FROM {table_name} WHERE {column_name} LIKE %s"
+                search_params = (f"%{search_value}%",)
+                search_type = "partial_text_match"
+            elif any(num_type in column_type for num_type in ['int', 'decimal', 'float', 'double']):
+                # Numeric column - try exact match
+                try:
+                    # Validate that search_value can be converted to number
+                    if '.' in search_value:
+                        float(search_value)
+                    else:
+                        int(search_value)
+                    query = f"SELECT * FROM {table_name} WHERE {column_name} = %s"
+                    search_params = (search_value,)
+                    search_type = "exact_numeric_match"
+                except ValueError:
+                    return ToolResult(
+                        success=False,
+                        data=None,
+                        error=f"Column '{column_name}' is numeric ({column_type}) but search value '{search_value}' is not a valid number"
+                    )
+            elif any(date_type in column_type for date_type in ['date', 'time', 'timestamp']):
+                # Date/time column - exact match
+                query = f"SELECT * FROM {table_name} WHERE {column_name} = %s"
+                search_params = (search_value,)
+                search_type = "exact_date_match"
+            else:
+                # Other types - try exact match
+                query = f"SELECT * FROM {table_name} WHERE {column_name} = %s"
+                search_params = (search_value,)
+                search_type = "exact_match"
+            
+            # Execute the search query
+            success, result, error = self.mysql.execute_query(query, search_params)
+            
+            if not success:
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"Search query failed: {error}. Query: {query}"
+                )
+            
+            return ToolResult(
+                success=True,
+                data={
+                    "table": table_name,
+                    "column": column_name,
+                    "search_value": search_value,
+                    "search_type": search_type,
+                    "column_type": column_type,
+                    "records": result,
+                    "count": len(result) if result else 0
+                },
+                metadata={
+                    "operation": "search",
+                    "table": table_name,
+                    "column": column_name,
+                    "query": query
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Error during search operation: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"Search operation failed: {str(e)}"
+            )
     
     async def _stats_operation(self) -> ToolResult:
         """Handle stats operations."""
@@ -669,10 +768,10 @@ class MySQLDatabaseTool(BaseTool):
             return ToolResult(
                 success=False,
                 data=None,
-                error="SQL operation requires a query"
+                error="SQL operation requires a query. Usage: sql SELECT * FROM table_name"
             )
         
-        query = " ".join(args)
+        query = " ".join(args).strip()
         
         # Basic safety check - prevent dangerous operations
         dangerous_keywords = ['DROP', 'TRUNCATE', 'ALTER DATABASE', 'CREATE DATABASE']
@@ -682,26 +781,123 @@ class MySQLDatabaseTool(BaseTool):
                 return ToolResult(
                     success=False,
                     data=None,
-                    error=f"Dangerous operation '{keyword}' not allowed"
+                    error=f"Dangerous operation '{keyword}' not allowed. Only SELECT, INSERT, UPDATE, DELETE, SHOW, DESCRIBE operations are permitted."
                 )
         
-        success, result, error = self.mysql.execute_query(query)
-        
-        if not success:
+        try:
+            success, result, error = self.mysql.execute_query(query)
+            
+            if not success:
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"SQL query execution failed: {error}\nQuery: {query}\nHint: Check your SQL syntax and table/column names."
+                )
+            
+            # Handle different types of results
+            if isinstance(result, list):
+                # SELECT, SHOW, DESCRIBE queries
+                count = len(result)
+                result_type = "records"
+            else:
+                # INSERT, UPDATE, DELETE queries (returns affected row count)
+                count = result
+                result_type = "affected_rows"
+            
+            return ToolResult(
+                success=True,
+                data={
+                    "query": query,
+                    "result": result,
+                    "count": count,
+                    "result_type": result_type
+                },
+                metadata={
+                    "operation": "custom_query",
+                    "query_type": query.split()[0].upper() if query else "UNKNOWN"
+                }
+            )
+            
+        except Exception as e:
+            # Catch any unexpected exceptions that might not be handled by execute_query
+            logger.error(f"Unexpected error in custom query operation: {e}")
             return ToolResult(
                 success=False,
                 data=None,
-                error=f"Query failed: {error}"
+                error=f"Unexpected error executing SQL query: {str(e)}\nQuery: {query}\nThis might be a connection issue or internal error."
             )
+    
+    async def _help_operation(self) -> ToolResult:
+        """Handle help operation - shows detailed usage information."""
+        help_info = {
+            "operations": {
+                "list_tables": {
+                    "description": "List all tables in the database",
+                    "usage": "list_tables",
+                    "example": "list_tables"
+                },
+                "describe": {
+                    "description": "Show table structure and columns",
+                    "usage": "describe <table_name>",
+                    "example": "describe users"
+                },
+                "get": {
+                    "description": "Retrieve data from table",
+                    "usage": "get <table> [conditions]",
+                    "examples": [
+                        "get users",
+                        "get users id=1", 
+                        "get users * 10"
+                    ]
+                },
+                "set": {
+                    "description": "Insert new record into table",
+                    "usage": "set <table> <json_data>",
+                    "example": 'set users {"name": "John", "email": "john@example.com", "age": 25}',
+                    "important": "Data must be valid JSON format with double quotes"
+                },
+                "update": {
+                    "description": "Update existing records",
+                    "usage": "update <table> <json_data> WHERE <condition>",
+                    "example": 'update users {"name": "Jane"} WHERE id=1'
+                },
+                "delete": {
+                    "description": "Delete records from table",
+                    "usage": "delete <table> WHERE <condition>",
+                    "example": "delete users WHERE id=1"
+                },
+                "search": {
+                    "description": "Search for records by column value",
+                    "usage": "search <table> <column> <value>",
+                    "example": "search users name John"
+                },
+                "stats": {
+                    "description": "Show database statistics",
+                    "usage": "stats",
+                    "example": "stats"
+                },
+                "create_table": {
+                    "description": "Create a new table",
+                    "usage": "create_table <table_name> (<column_definitions>)",
+                    "example": "create_table users (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100), age INT)"
+                },
+                "sql": {
+                    "description": "Execute custom SQL query",
+                    "usage": "sql <query>",
+                    "example": "sql SELECT * FROM users WHERE age > 18"
+                }
+            },
+            "common_errors": {
+                "JSON parsing error": "Use double quotes in JSON: {\"key\": \"value\"}",
+                "Table doesn't exist": "Use 'list_tables' to see available tables",
+                "Syntax error": "Check operation format and examples above"
+            }
+        }
         
         return ToolResult(
             success=True,
-            data={
-                "query": query,
-                "result": result,
-                "count": len(result) if isinstance(result, list) else result
-            },
-            metadata={"operation": "custom_query"}
+            data=help_info,
+            metadata={"operation": "help"}
         )
     
     def get_schema(self) -> Dict[str, Any]:

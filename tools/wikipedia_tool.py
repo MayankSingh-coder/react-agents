@@ -11,10 +11,61 @@ class WikipediaTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="wikipedia",
-            description="Search Wikipedia for information about people, places, events, concepts, and general knowledge"
+            description=self._get_detailed_description()
         )
         # Set Wikipedia language and other settings
         wikipedia.set_lang("en")
+    
+    def _get_detailed_description(self) -> str:
+        """Get detailed description with examples for Wikipedia operations."""
+        return """Search Wikipedia for information about people, places, events, concepts, and general knowledge.
+
+WHAT IT DOES:
+• Searches Wikipedia articles using the provided query
+• Returns article summaries, titles, and URLs
+• Provides factual, encyclopedic information
+• Automatically suggests corrections for misspelled queries
+
+INFORMATION TYPES:
+• People: Scientists, politicians, celebrities, historical figures
+  Examples: "Albert Einstein", "Marie Curie", "Nelson Mandela"
+  
+• Places: Countries, cities, landmarks, geographical features  
+  Examples: "Paris France", "Mount Everest", "Great Wall of China"
+  
+• Events: Historical events, wars, discoveries, accidents
+  Examples: "World War II", "Moon landing", "Renaissance"
+  
+• Concepts: Scientific topics, philosophies, technologies
+  Examples: "Quantum mechanics", "Artificial intelligence", "Democracy"
+  
+• Organizations: Companies, institutions, governments
+  Examples: "United Nations", "Harvard University", "NASA"
+
+USAGE EXAMPLES:
+- Person lookup: "Stephen Hawking"
+- Place information: "Tokyo Japan"  
+- Historical event: "American Civil War"
+- Scientific concept: "Theory of relativity"
+- Current topics: "Climate change"
+
+SEARCH TIPS:
+• Use specific names for better results
+• Include context if term is ambiguous (e.g., "Apple company" vs "Apple fruit")
+• Try alternative spellings if no results found
+• Be concise but descriptive
+
+RETURNED INFORMATION:
+- Article title and summary (3 sentences by default)
+- Wikipedia page URL for full article
+- Related categories and links
+- Auto-corrected search terms if applicable
+
+LIMITATIONS:
+- Only searches English Wikipedia
+- May not have very recent information
+- Some controversial topics may have limited coverage
+- Disambiguation may be needed for common terms"""
     
     async def execute(self, query: str, **kwargs) -> ToolResult:
         """Execute Wikipedia search and retrieval."""
