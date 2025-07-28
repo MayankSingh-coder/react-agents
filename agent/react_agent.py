@@ -17,6 +17,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from .agent_state import AgentState, AgentMemory, ThoughtActionObservation, create_initial_state
 from .tool_manager import ToolManager
+from tools.enhanced_tool_manager import EnhancedToolManager
 from .planner import Planner, Plan, PlanType
 from .executor import PlanExecutor, ExecutionStatus
 from .adaptive_replanner import AdaptiveReplanner, AdaptationContext, ReplanDecision
@@ -33,10 +34,27 @@ import time
 class ReactAgent:
     """React Agent that implements the Thought-Action-Observation pattern."""
     
-    def __init__(self, verbose: bool = True, mode: str = "hybrid"):
+    def __init__(self, verbose: bool = True, mode: str = "hybrid", use_mysql: bool = True):
         self.verbose = verbose
         self.mode = mode  # "react", "plan_execute", or "hybrid"
-        self.tool_manager = ToolManager()
+        
+        # Configure MySQL with root user and password
+        mysql_config = {
+            "host": "localhost",
+            "port": 3306,
+            "database": "react_agent_db",
+            "user": "root",
+            "password": "root"
+        }
+        
+        # Use EnhancedToolManager with MySQL support
+        self.tool_manager = EnhancedToolManager(use_mysql=use_mysql, mysql_config=mysql_config)
+        
+        if self.verbose:
+            print(f"🔧 Initialized ReactAgent with {'MySQL' if use_mysql else 'in-memory'} database")
+            if use_mysql:
+                db_status = self.tool_manager.get_database_status()
+                print(f"📊 Database Status: {db_status}")
         
         # Initialize enhanced memory system
         self.memory_store = MemoryStore()
@@ -202,8 +220,10 @@ class ReactAgent:
                 "error": final_state.get("error_message") if isinstance(final_state, dict) else f"Invalid state type: {type(final_state)}",
                 "metadata": {
                     **(final_state.get("metadata", {}) if isinstance(final_state, dict) else {}),
-                    "mode": self.mode,
-                    "session_id": session_id,
+                    "mode": final_state.get("mode") if isinstance(final_state, dict) else self.mode,
+                    "session_id": final_state.get("session_id") if isinstance(final_state, dict) else session_id,
+                    "chosen_approach": final_state.get("chosen_approach") if isinstance(final_state, dict) else None,
+                    "current_plan": final_state.get("current_plan") if isinstance(final_state, dict) else None,
                     "execution_time": execution_time
                 }
             }
@@ -799,7 +819,7 @@ Begin!"""
                 context=context
             )
             
-            state["plan"] = plan
+            state["current_plan"] = plan
             state["metadata"]["plan_id"] = plan.id
             state["metadata"]["plan_confidence"] = plan.confidence
             
@@ -819,7 +839,7 @@ Begin!"""
             print(f"\n⚡ Executing plan...")
         
         try:
-            plan = state.get("plan")
+            plan = state.get("current_plan")
             if not plan:
                 state["has_error"] = True
                 state["error_message"] = "No plan available for execution"
@@ -951,7 +971,7 @@ Always explain your reasoning briefly."""
                 execution_results=execution_result.step_results if hasattr(execution_result, 'step_results') else [],
                 partial_outputs=state.get("partial_outputs", {}),
                 failed_attempts=state.get("failed_attempts", []),
-                available_tools=list(self.tool_manager.tools.keys()),
+                available_tools=self.tool_manager.get_tool_names(),
                 time_budget_remaining=max(0, 300 - (state.get("current_step", 0) * 10)),  # Estimate remaining time
                 success_probability=execution_result.success_rate if hasattr(execution_result, 'success_rate') else 0.5,
                 context_variables=state.get("context_variables", {})
@@ -1075,3 +1095,36 @@ Always explain your reasoning briefly."""
         
         # Default fallback
         return "finish"
+    
+    def switch_database_type(self, use_mysql: bool, mysql_config: Optional[Dict[str, Any]] = None):
+        """Switch between MySQL and in-memory database."""
+        if mysql_config is None:
+            mysql_config = {
+                "host": "localhost",
+                "port": 3306,
+                "database": "react_agent_db",
+                "user": "root",
+                "password": "root"
+            }
+        
+        self.tool_manager.switch_database_type(use_mysql, mysql_config)
+        
+        if self.verbose:
+            print(f"🔄 Switched to {'MySQL' if use_mysql else 'in-memory'} database")
+            if use_mysql:
+                db_status = self.tool_manager.get_database_status()
+                print(f"📊 Database Status: {db_status}")
+    
+    def get_database_status(self) -> Dict[str, Any]:
+        """Get current database status."""
+        return self.tool_manager.get_database_status()
+    
+    def get_enhanced_tool_info(self) -> Dict[str, Any]:
+        """Get comprehensive information about available tools."""
+        return {
+            "tool_manager_type": "EnhancedToolManager",
+            "database_status": self.get_database_status(),
+            "available_tools": self.tool_manager.get_tool_names(),
+            "tool_descriptions": self.tool_manager.get_tool_descriptions(),
+            "tools_schema": self.tool_manager.get_tools_schema()
+        }

@@ -195,8 +195,8 @@ class StreamingReactAgent(ReactAgent):
         result_state = await super()._plan_node(state)
         
         # Emit plan created event
-        if result_state.get("plan"):
-            plan = result_state["plan"]
+        if result_state.get("current_plan"):
+            plan = result_state["current_plan"]
             await self._emit_event(EventType.PLAN_CREATED, {
                 "plan": {
                     "description": getattr(plan, 'description', 'No description'),
@@ -217,8 +217,8 @@ class StreamingReactAgent(ReactAgent):
     
     async def _execute_node(self, state: AgentState) -> AgentState:
         """Execute node with event emission."""
-        if state.get("plan"):
-            plan = state["plan"]
+        if state.get("current_plan"):
+            plan = state["current_plan"]
             
             # Emit plan step start events
             steps = getattr(plan, 'steps', [])

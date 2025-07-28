@@ -30,7 +30,8 @@ class LLMManager:
             model=Config.GEMINI_MODEL,
             temperature=Config.TEMPERATURE,
             max_tokens=Config.MAX_TOKENS,
-            google_api_key=Config.GOOGLE_API_KEY
+            google_api_key=Config.GOOGLE_API_KEY,
+            convert_system_message_to_human=True
         )
     
     def cleanup_session(self, session_id: str):

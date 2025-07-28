@@ -3,6 +3,10 @@
 from typing import Any, Dict, List, Optional, TypedDict
 from pydantic import BaseModel
 
+# Import types
+from .planner import Plan
+from .adaptive_replanner import ReplanDecision, AdaptationContext
+
 
 class ThoughtActionObservation(BaseModel):
     """Represents a single thought-action-observation cycle."""
@@ -39,6 +43,32 @@ class AgentState(TypedDict):
     
     # Metadata
     metadata: Dict[str, Any]
+    
+    # Session and mode information
+    session_id: Optional[str]
+    mode: Optional[str]
+    
+    # Approach selection for hybrid mode
+    chosen_approach: Optional[str]
+    
+    # Plan for plan-execute mode
+    current_plan: Optional[Plan]
+    
+    # Evaluation result for plan execution
+    evaluation_result: Optional[str]
+    
+    # Execution result for plan execution
+    execution_result: Optional[Any]
+    
+    # Plan failure flag
+    plan_failed: Optional[bool]
+    
+    # Replanning system fields
+    replan_decision: Optional[ReplanDecision]
+    adaptation_context: Optional[AdaptationContext]
+    replan_result: Optional[str]
+    replan_record: Optional[Dict[str, Any]]
+    replanning_attempts: Optional[int]
 
 
 class AgentMemory:
@@ -117,5 +147,17 @@ def create_initial_state(input_text: str, max_steps: int = 10) -> AgentState:
         is_complete=False,
         has_error=False,
         error_message=None,
-        metadata={}
+        metadata={},
+        session_id=None,
+        mode=None,
+        chosen_approach=None,
+        current_plan=None,
+        evaluation_result=None,
+        execution_result=None,
+        plan_failed=None,
+        replan_decision=None,
+        adaptation_context=None,
+        replan_result=None,
+        replan_record=None,
+        replanning_attempts=None
     )

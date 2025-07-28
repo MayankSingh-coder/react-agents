@@ -175,7 +175,8 @@ class MySQLDatabaseTool(BaseTool):
             elif operation == "stats":
                 return await self._stats_operation()
             elif operation == "create_table":
-                return await self._create_table_operation(parts[1:])
+                # Handle create_table specially to preserve parentheses content
+                return await self._create_table_operation_improved(query)
             elif operation == "custom_query" or operation == "sql":
                 return await self._custom_query_operation(parts[1:])
             else:
@@ -573,6 +574,54 @@ class MySQLDatabaseTool(BaseTool):
             metadata={"operation": "stats", "database": self.mysql.database}
         )
     
+    async def _create_table_operation_improved(self, query: str) -> ToolResult:
+        """Handle create table operations with improved parsing. Format: create_table <table_name> (<column_definitions>)."""
+        import re
+        
+        # Parse: create_table table_name (column definitions)
+        match = re.match(r'create_table\s+(\w+)\s*\((.+)\)', query.strip(), re.IGNORECASE)
+        
+        if not match:
+            return ToolResult(
+                success=False,
+                data=None,
+                error="Invalid create_table format. Expected: create_table table_name (column_definitions)"
+            )
+        
+        table_name = match.group(1)
+        column_definitions = match.group(2).strip()
+        
+        # Basic validation
+        if self.mysql.table_exists(table_name):
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"Table '{table_name}' already exists"
+            )
+        
+        sql_query = f"CREATE TABLE {table_name} ({column_definitions})"
+        
+        success, result, error = self.mysql.execute_query(sql_query)
+        
+        if not success:
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"Create table failed: {error}"
+            )
+        
+        return ToolResult(
+            success=True,
+            data={
+                "table_name": table_name,
+                "created": True
+            },
+            metadata={
+                "operation": "create_table",
+                "table": table_name
+            }
+        )
+
     async def _create_table_operation(self, args: List[str]) -> ToolResult:
         """Handle create table operations. Format: create_table <table_name> <column_definitions>."""
         if len(args) < 2:

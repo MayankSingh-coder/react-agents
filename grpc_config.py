@@ -87,6 +87,7 @@ def create_isolated_llm():
         temperature=Config.TEMPERATURE,
         max_tokens=Config.MAX_TOKENS,
         google_api_key=Config.GOOGLE_API_KEY,
+        convert_system_message_to_human=True,
         # Add gRPC-specific configurations
         transport='grpc',
         client_options={

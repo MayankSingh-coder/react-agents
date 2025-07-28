@@ -72,7 +72,7 @@ class ReactChatbot:
 
 async def main():
     """Main function to run the chatbot in console mode."""
-    print("🤖 Octopus Prime Chat Bot Reactive Agent")
+    print("🤖 React Agent Chatbot")
     print("=" * 50)
     print("Type 'quit', 'exit', or 'bye' to end the conversation")
     print("Type 'stats' to see usage statistics")
