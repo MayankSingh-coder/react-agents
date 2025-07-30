@@ -163,6 +163,97 @@ class ThinkingDisplay:
             
         elif event.type == EventType.PLAN_STEP_COMPLETE:
             st.markdown(f"**{timestamp}** - ✅ **Plan Execution Complete**")
+            
+        elif event.type == EventType.REFLECTION_START:
+            original_response = event.data.get("original_response", "")
+            quality_threshold = event.data.get("quality_threshold", 0.7)
+            st.markdown(f"**{timestamp}** - 🔍 **Starting Reflection Process**")
+            st.markdown(f"**Quality Threshold:** {quality_threshold:.2f}")
+            if original_response:
+                st.markdown(f"**Original Response Preview:** {original_response[:100]}{'...' if len(original_response) > 100 else ''}")
+                
+        elif event.type == EventType.REFLECTION_CRITIQUE:
+            iteration = event.data.get("iteration", 1)
+            critique = event.data.get("critique", {})
+            st.markdown(f"**{timestamp}** - 🤔 **Reflection Critique - Iteration {iteration}:**")
+            
+            quality = critique.get("overall_quality", 0.0)
+            confidence = critique.get("confidence", 0.0)
+            needs_refinement = critique.get("needs_refinement", False)
+            
+            # Quality score with color coding
+            if quality >= 0.8:
+                st.success(f"Quality Score: {quality:.2f} (Excellent)")
+            elif quality >= 0.7:
+                st.info(f"Quality Score: {quality:.2f} (Good)")
+            elif quality >= 0.5:
+                st.warning(f"Quality Score: {quality:.2f} (Needs Improvement)")
+            else:
+                st.error(f"Quality Score: {quality:.2f} (Poor)")
+            
+            st.markdown(f"**Confidence:** {confidence:.2f}")
+            st.markdown(f"**Needs Refinement:** {'Yes' if needs_refinement else 'No'}")
+            
+            # Show issues if any
+            issues = critique.get("issues", [])
+            if issues:
+                st.markdown("**Issues Found:**")
+                for i, issue in enumerate(issues, 1):
+                    issue_type = issue.get("type", "unknown")
+                    severity = issue.get("severity", "unknown")
+                    description = issue.get("description", "No description")
+                    suggestion = issue.get("suggestion", "No suggestion")
+                    
+                    severity_emoji = {
+                        "critical": "🔴",
+                        "major": "🟠", 
+                        "minor": "🟡",
+                        "suggestion": "🔵"
+                    }.get(severity.lower(), "⚪")
+                    
+                    st.markdown(f"  {severity_emoji} **{issue_type.title()}** ({severity}): {description}")
+                    st.markdown(f"    💡 *Suggestion: {suggestion}*")
+            
+            # Show strengths if any
+            strengths = critique.get("strengths", [])
+            if strengths:
+                st.markdown("**Strengths:**")
+                for strength in strengths:
+                    st.markdown(f"  ✅ {strength}")
+                    
+            # Show reasoning
+            reasoning = critique.get("reasoning", "")
+            if reasoning:
+                st.markdown(f"**Reasoning:** {reasoning}")
+                
+        elif event.type == EventType.REFLECTION_REFINEMENT:
+            improvements = event.data.get("improvements", [])
+            quality_improvement = event.data.get("quality_improvement", 0.0)
+            st.markdown(f"**{timestamp}** - ✨ **Response Refinement:**")
+            
+            if quality_improvement > 0:
+                st.success(f"Quality Improvement: +{quality_improvement:.2f}")
+            
+            if improvements:
+                st.markdown("**Improvements Made:**")
+                for improvement in improvements:
+                    st.markdown(f"  🔧 {improvement}")
+                    
+        elif event.type == EventType.REFLECTION_COMPLETE:
+            final_quality = event.data.get("final_quality_score", 0.0)
+            threshold_met = event.data.get("threshold_met", False)
+            iterations = event.data.get("reflection_iterations", 0)
+            total_improvements = event.data.get("total_improvements", 0)
+            
+            st.markdown(f"**{timestamp}** - 🎉 **Reflection Complete**")
+            
+            if threshold_met:
+                st.success(f"✅ Quality threshold met! Final score: {final_quality:.2f}")
+            else:
+                st.warning(f"⚠️ Quality threshold not met. Final score: {final_quality:.2f}")
+            
+            st.markdown(f"**Reflection Iterations:** {iterations}")
+            st.markdown(f"**Total Improvements:** {total_improvements}")
 
 
 async def run_streaming_chat(chatbot: StreamingChatbot, prompt: str, thinking_display: ThinkingDisplay):
@@ -185,6 +276,27 @@ async def run_streaming_chat(chatbot: StreamingChatbot, prompt: str, thinking_di
                 plan = event.data.get("plan", {})
                 steps_count = len(plan.get("steps", []))
                 thinking_display.update_status(f"Created plan with {steps_count} steps", "thinking")
+                
+            elif event.type == EventType.REFLECTION_START:
+                thinking_display.update_status("Starting reflection and self-critique...", "thinking")
+                
+            elif event.type == EventType.REFLECTION_CRITIQUE:
+                iteration = event.data.get("iteration", 1)
+                critique = event.data.get("critique", {})
+                quality = critique.get("overall_quality", 0.0)
+                thinking_display.update_status(f"Reflection iteration {iteration}: Quality {quality:.2f}", "thinking")
+                
+            elif event.type == EventType.REFLECTION_REFINEMENT:
+                improvements = event.data.get("improvements", [])
+                thinking_display.update_status(f"Refining response with {len(improvements)} improvements", "action")
+                
+            elif event.type == EventType.REFLECTION_COMPLETE:
+                final_quality = event.data.get("final_quality_score", 0.0)
+                threshold_met = event.data.get("threshold_met", False)
+                if threshold_met:
+                    thinking_display.update_status(f"Reflection complete! Quality: {final_quality:.2f}", "success")
+                else:
+                    thinking_display.update_status(f"Reflection complete. Quality: {final_quality:.2f}", "thinking")
                 
             elif event.type == EventType.COMPLETE:
                 thinking_display.update_status("Task completed successfully!", "success")
@@ -230,7 +342,7 @@ st.set_page_config(
 
 # Initialize session state
 if "chatbot" not in st.session_state:
-    st.session_state.chatbot = StreamingChatbot(verbose=False, mode="hybrid")
+    st.session_state.chatbot = StreamingChatbot(verbose=False, mode="hybrid", enable_reflection=True)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "show_thinking" not in st.session_state:
@@ -245,8 +357,8 @@ def main():
     """Main Streamlit application."""
     
     # Title and description
-    st.title("🧠 Octopus Prime AI Agent")
-    st.markdown("Watch the AI agent think and reason in real-time as it processes your requests!")
+    st.title("🧠 Octopus Prime AI Agent with Reflection")
+    st.markdown("Watch the AI agent think, reason, and reflect in real-time as it processes your requests! 🔍✨")
     
     # Sidebar
     with st.sidebar:
@@ -260,8 +372,15 @@ def main():
             help="Choose how the agent processes requests"
         )
         
-        if mode != st.session_state.chatbot.agent.mode:
-            st.session_state.chatbot = StreamingChatbot(verbose=False, mode=mode)
+        # Reflection settings
+        enable_reflection = st.checkbox(
+            "Enable Reflection",
+            value=True,
+            help="Enable self-critique and response refinement"
+        )
+        
+        if mode != st.session_state.chatbot.agent.mode or enable_reflection != getattr(st.session_state.chatbot.agent, 'enable_reflection', True):
+            st.session_state.chatbot = StreamingChatbot(verbose=False, mode=mode, enable_reflection=enable_reflection)
             st.rerun()
         
         # Real-time thinking toggle
@@ -302,15 +421,31 @@ def main():
         # Example queries
         st.header("💡 Example Queries")
         examples = [
-            "Calculate 15 * 23 and tell me about mathematics",
-            "Search for information about artificial intelligence",
-            "Store my favorite color as blue in the database",
-            "What is the square root of 144?",
-            "Find information about Python programming and store it"
+            "Explain quantum computing and its applications",
+            "What is machine learning and how does it work?",
+            "Search for recent developments in artificial intelligence",
+            "Calculate compound interest and explain the formula",
+            "Compare different programming languages for beginners",
+            "Analyze the benefits of renewable energy sources"
+        ]
+        
+        # Conversation history examples
+        st.header("🗨️ Conversation History Examples")
+        history_examples = [
+            "What did we discuss before?",
+            "Show me the last 3 conversations",
+            "What was my previous question about?",
+            "Can you show me the last calculation result?",
+            "What topics have we covered in this session?"
         ]
         
         for example in examples:
             if st.button(f"📝 {example[:30]}...", key=f"example_{hash(example)}"):
+                st.session_state.example_query = example
+                st.rerun()
+        
+        for example in history_examples:
+            if st.button(f"💬 {example[:30]}...", key=f"history_{hash(example)}"):
                 st.session_state.example_query = example
                 st.rerun()
     
@@ -419,7 +554,7 @@ st.markdown("---")
 st.markdown(
     """
     <div style='text-align: center; color: #666;'>
-        🧠 Real-time AI Agent Thinking 
+        🧠 Real-time AI Agent Thinking with Self-Reflection 🔍
     </div>
     """, 
     unsafe_allow_html=True

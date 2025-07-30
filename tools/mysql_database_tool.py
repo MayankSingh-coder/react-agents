@@ -2,11 +2,18 @@
 
 import json
 import time
-import mysql.connector
-from mysql.connector import Error
 from typing import Any, Dict, List, Optional, Tuple
 from .base_tool import BaseTool, ToolResult
 import logging
+
+try:
+    import mysql.connector
+    from mysql.connector import Error
+    MYSQL_AVAILABLE = True
+except ImportError:
+    MYSQL_AVAILABLE = False
+    mysql = None
+    Error = Exception
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +36,8 @@ class MySQLConnection:
     
     def connect(self):
         """Establish connection to MySQL database."""
+        if not MYSQL_AVAILABLE:
+            raise ImportError("MySQL connector not available")
         try:
             self.connection = mysql.connector.connect(
                 host=self.host,
@@ -135,6 +144,8 @@ class MySQLDatabaseTool(BaseTool):
             name="mysql_database",
             description=self._get_detailed_description()
         )
+        if not MYSQL_AVAILABLE:
+            raise ImportError("MySQL connector not available. Please install mysql-connector-python to use MySQLDatabaseTool.")
         self.mysql = MySQLConnection(host, database, user, password, port)
         self._connect_to_database()
     

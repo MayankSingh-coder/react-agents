@@ -21,6 +21,7 @@ from tools.enhanced_tool_manager import EnhancedToolManager
 from .planner import Planner, Plan, PlanType
 from .executor import PlanExecutor, ExecutionStatus
 from .adaptive_replanner import AdaptiveReplanner, AdaptationContext, ReplanDecision
+from .reflection_module import ReflectionModule
 from memory import MemoryStore, ContextManager, VectorMemory, EpisodicMemory
 from memory.memory_store import MemoryType
 from memory.context_manager import ReasoningStep, ToolContext
@@ -34,9 +35,11 @@ import time
 class ReactAgent:
     """React Agent that implements the Thought-Action-Observation pattern."""
     
-    def __init__(self, verbose: bool = True, mode: str = "hybrid", use_mysql: bool = True):
+    def __init__(self, verbose: bool = True, mode: str = "hybrid", use_mysql: bool = True, 
+                 enable_reflection: bool = True, reflection_quality_threshold: float = 0.7):
         self.verbose = verbose
         self.mode = mode  # "react", "plan_execute", or "hybrid"
+        self.enable_reflection = enable_reflection
         
         # Configure MySQL with root user and password
         mysql_config = {
@@ -69,6 +72,13 @@ class ReactAgent:
         # Initialize adaptive replanner for enhanced hybrid approach
         self.adaptive_replanner = AdaptiveReplanner(self.planner, self.tool_manager, self.context_manager)
         
+        # Initialize reflection module
+        self.reflection_module = ReflectionModule(
+            quality_threshold=reflection_quality_threshold,
+            max_refinement_iterations=3,
+            verbose=self.verbose
+        ) if enable_reflection else None
+        
         # Legacy memory for backward compatibility
         self.memory = AgentMemory()
         
@@ -89,11 +99,17 @@ class ReactAgent:
             workflow.add_node("plan", self._plan_node)
             workflow.add_node("execute", self._execute_node)
             workflow.add_node("finish", self._finish_node)
+            if self.enable_reflection:
+                workflow.add_node("reflect", self._reflect_node)
             
             workflow.set_entry_point("plan")
             workflow.add_edge("plan", "execute")
             workflow.add_edge("execute", "finish")
-            workflow.add_edge("finish", END)
+            if self.enable_reflection:
+                workflow.add_edge("finish", "reflect")
+                workflow.add_edge("reflect", END)
+            else:
+                workflow.add_edge("finish", END)
             
         elif self.mode == "hybrid":
             # Enhanced hybrid approach with adaptive replanning
@@ -106,6 +122,8 @@ class ReactAgent:
             workflow.add_node("act", self._act_node)
             workflow.add_node("observe", self._observe_node)
             workflow.add_node("finish", self._finish_node)
+            if self.enable_reflection:
+                workflow.add_node("reflect", self._reflect_node)
             
             workflow.set_entry_point("decide_approach")
             
@@ -154,13 +172,19 @@ class ReactAgent:
             
             workflow.add_edge("act", "observe")
             workflow.add_edge("observe", "think")
-            workflow.add_edge("finish", END)
+            if self.enable_reflection:
+                workflow.add_edge("finish", "reflect")
+                workflow.add_edge("reflect", END)
+            else:
+                workflow.add_edge("finish", END)
             
         else:  # Default ReAct mode
             workflow.add_node("think", self._think_node)
             workflow.add_node("act", self._act_node)
             workflow.add_node("observe", self._observe_node)
             workflow.add_node("finish", self._finish_node)
+            if self.enable_reflection:
+                workflow.add_node("reflect", self._reflect_node)
             
             workflow.set_entry_point("think")
             
@@ -175,7 +199,11 @@ class ReactAgent:
             
             workflow.add_edge("act", "observe")
             workflow.add_edge("observe", "think")
-            workflow.add_edge("finish", END)
+            if self.enable_reflection:
+                workflow.add_edge("finish", "reflect")
+                workflow.add_edge("reflect", END)
+            else:
+                workflow.add_edge("finish", END)
         
         # Compile with memory
         memory = MemorySaver()
@@ -463,6 +491,107 @@ class ReactAgent:
         except Exception as e:
             state["has_error"] = True
             state["error_message"] = f"Final answer generation failed: {str(e)}"
+            return state
+    
+    async def _reflect_node(self, state: AgentState) -> AgentState:
+        """Reflection node - performs self-critique and response refinement."""
+        if not self.reflection_module:
+            if self.verbose:
+                print("🔍 Reflection disabled, skipping...")
+            return state
+        
+        if self.verbose:
+            print(f"\n🔍 Starting reflection process...")
+        
+        try:
+            # Set reflection enabled flag
+            state["reflection_enabled"] = True
+            
+            # Store original response for comparison
+            original_response = state.get("output", "")
+            state["original_response"] = original_response
+            
+            if not original_response:
+                if self.verbose:
+                    print("⚠️ No output to reflect on, skipping reflection")
+                return state
+            
+            # Prepare reasoning steps for reflection
+            reasoning_steps = []
+            
+            # Add thoughts as reasoning steps
+            for i, thought in enumerate(state.get("thoughts", [])):
+                reasoning_steps.append({
+                    "step": i + 1,
+                    "thought": thought,
+                    "action": None,
+                    "observation": None
+                })
+            
+            # Add actions and observations
+            actions = state.get("actions", [])
+            observations = state.get("observations", [])
+            tool_results = state.get("tool_results", [])
+            
+            for i, action in enumerate(actions):
+                step_data = {
+                    "step": action.get("step", i + 1),
+                    "thought": None,
+                    "action": action.get("name"),
+                    "action_input": action.get("input"),
+                    "observation": observations[i] if i < len(observations) else None
+                }
+                
+                # Find corresponding reasoning step or create new one
+                step_found = False
+                for rs in reasoning_steps:
+                    if rs["step"] == step_data["step"]:
+                        rs.update({k: v for k, v in step_data.items() if v is not None})
+                        step_found = True
+                        break
+                
+                if not step_found:
+                    reasoning_steps.append(step_data)
+            
+            # Sort reasoning steps by step number
+            reasoning_steps.sort(key=lambda x: x["step"])
+            
+            # Perform reflection and refinement
+            refined_response, reflection_metadata = await self.reflection_module.reflect_and_refine(
+                state, original_response, reasoning_steps
+            )
+            
+            # Update state with reflection results
+            state["output"] = refined_response
+            state["reflection_iterations"] = reflection_metadata["reflection_iterations"]
+            state["reflection_history"] = reflection_metadata["reflection_history"]
+            state["final_quality_score"] = reflection_metadata["final_quality_score"]
+            state["reflection_improvements"] = reflection_metadata["total_improvements"]
+            
+            # Update metadata
+            if "metadata" not in state:
+                state["metadata"] = {}
+            state["metadata"]["reflection"] = reflection_metadata
+            
+            if self.verbose:
+                print(f"🎉 Reflection completed!")
+                print(f"📊 Quality Score: {reflection_metadata['final_quality_score']:.2f}")
+                print(f"🔧 Improvements: {len(reflection_metadata['total_improvements'])}")
+                if reflection_metadata['total_improvements']:
+                    for improvement in reflection_metadata['total_improvements']:
+                        print(f"  • {improvement}")
+            
+            return state
+            
+        except Exception as e:
+            if self.verbose:
+                print(f"❌ Reflection failed: {str(e)}")
+            
+            # Add error to metadata but don't fail the entire process
+            if "metadata" not in state:
+                state["metadata"] = {}
+            state["metadata"]["reflection_error"] = str(e)
+            
             return state
     
     def _should_continue_after_think(self, state: AgentState) -> str:

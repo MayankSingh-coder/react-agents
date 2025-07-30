@@ -1,11 +1,18 @@
 """Enhanced Tool Manager with MySQL Database Support."""
 
 from typing import Any, Dict, List, Optional
-from tools import DatabaseTool, WikipediaTool, WebSearchTool, CalculatorTool, CppExecutorTool
-from tools.mysql_database_tool import MySQLDatabaseTool
+from tools import DatabaseTool, WikipediaTool, WebSearchTool, CalculatorTool, CppExecutorTool, CommandLineTool, FileManagerTool
 from tools.base_tool import BaseTool, ToolResult
+from tools.conversation_history_tool import ConversationHistoryTool
 from mysql_config import MySQLConfig
 import logging
+
+try:
+    from tools.mysql_database_tool import MySQLDatabaseTool
+    MYSQL_TOOL_AVAILABLE = True
+except ImportError:
+    MySQLDatabaseTool = None
+    MYSQL_TOOL_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +20,12 @@ logger = logging.getLogger(__name__)
 class EnhancedToolManager:
     """Enhanced tool manager with support for both in-memory and MySQL databases."""
     
-    def __init__(self, use_mysql: bool = False, mysql_config: Optional[Dict[str, Any]] = None):
+    def __init__(self, use_mysql: bool = False, mysql_config: Optional[Dict[str, Any]] = None, 
+                 chatbot_instance=None):
         self.tools: Dict[str, BaseTool] = {}
         self.use_mysql = use_mysql
         self.mysql_config = mysql_config or MySQLConfig.get_config()
+        self.chatbot_instance = chatbot_instance
         self._initialize_tools()
     
     def _initialize_tools(self):
@@ -24,7 +33,7 @@ class EnhancedToolManager:
         tools = []
         
         # Database tool selection
-        if self.use_mysql:
+        if self.use_mysql and MYSQL_TOOL_AVAILABLE:
             try:
                 # Validate MySQL config before creating tool
                 if MySQLConfig.validate_config(self.mysql_config):
@@ -44,17 +53,26 @@ class EnhancedToolManager:
                 logger.error(f"❌ Failed to initialize MySQL tool: {e}")
                 logger.info("🔄 Falling back to in-memory database")
                 tools.append(DatabaseTool())
+        elif self.use_mysql and not MYSQL_TOOL_AVAILABLE:
+            logger.warning("❌ MySQL requested but not available, falling back to in-memory database")
+            tools.append(DatabaseTool())
         else:
             # Use in-memory database tool
             tools.append(DatabaseTool())
             logger.info("✅ In-memory Database Tool initialized")
+        
+        # Add conversation history tool
+        conversation_tool = ConversationHistoryTool(self.chatbot_instance)
+        tools.append(conversation_tool)
         
         # Add other tools
         tools.extend([
             WikipediaTool(),
             WebSearchTool(),
             CalculatorTool(),
-            CppExecutorTool()
+            CppExecutorTool(),
+            CommandLineTool(),
+            FileManagerTool()
         ])
         
         # Register all tools
@@ -199,6 +217,15 @@ class EnhancedToolManager:
             status["database"] = db_tool.mysql.database
         
         return status
+    
+    def set_chatbot_instance(self, chatbot_instance):
+        """Set the chatbot instance for the conversation history tool."""
+        self.chatbot_instance = chatbot_instance
+        
+        # Update the conversation history tool if it exists
+        conversation_tool = self.get_tool("conversation_history")
+        if conversation_tool:
+            conversation_tool.set_chatbot_instance(chatbot_instance)
     
     def __str__(self) -> str:
         """String representation of the tool manager."""
