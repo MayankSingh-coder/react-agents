@@ -69,6 +69,14 @@ class AgentState(TypedDict):
     replan_result: Optional[str]
     replan_record: Optional[Dict[str, Any]]
     replanning_attempts: Optional[int]
+    
+    # Reflection system fields
+    reflection_enabled: Optional[bool]
+    reflection_iterations: Optional[int]
+    reflection_history: Optional[List[Dict[str, Any]]]
+    final_quality_score: Optional[float]
+    reflection_improvements: Optional[List[str]]
+    original_response: Optional[str]
 
 
 class AgentMemory:
@@ -159,5 +167,11 @@ def create_initial_state(input_text: str, max_steps: int = 10) -> AgentState:
         adaptation_context=None,
         replan_result=None,
         replan_record=None,
-        replanning_attempts=None
+        replanning_attempts=None,
+        reflection_enabled=None,
+        reflection_iterations=None,
+        reflection_history=None,
+        final_quality_score=None,
+        reflection_improvements=None,
+        original_response=None
     )

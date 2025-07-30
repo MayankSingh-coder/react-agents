@@ -2,10 +2,16 @@
 
 from typing import Any, Dict, List, Optional
 from tools import DatabaseTool, WikipediaTool, WebSearchTool, CalculatorTool, CppExecutorTool, CommandLineTool, FileManagerTool
-from tools.mysql_database_tool import MySQLDatabaseTool
 from tools.base_tool import BaseTool, ToolResult
 from mysql_config import MySQLConfig
 import logging
+
+try:
+    from tools.mysql_database_tool import MySQLDatabaseTool
+    MYSQL_TOOL_AVAILABLE = True
+except ImportError:
+    MySQLDatabaseTool = None
+    MYSQL_TOOL_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +30,7 @@ class EnhancedToolManager:
         tools = []
         
         # Database tool selection
-        if self.use_mysql:
+        if self.use_mysql and MYSQL_TOOL_AVAILABLE:
             try:
                 # Validate MySQL config before creating tool
                 if MySQLConfig.validate_config(self.mysql_config):
@@ -44,6 +50,9 @@ class EnhancedToolManager:
                 logger.error(f"❌ Failed to initialize MySQL tool: {e}")
                 logger.info("🔄 Falling back to in-memory database")
                 tools.append(DatabaseTool())
+        elif self.use_mysql and not MYSQL_TOOL_AVAILABLE:
+            logger.warning("❌ MySQL requested but not available, falling back to in-memory database")
+            tools.append(DatabaseTool())
         else:
             # Use in-memory database tool
             tools.append(DatabaseTool())
