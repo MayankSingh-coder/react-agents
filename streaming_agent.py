@@ -3,7 +3,7 @@
 import asyncio
 import json
 import time
-from typing import AsyncGenerator, Dict, Any, Optional
+from typing import AsyncGenerator, Dict, Any, Optional, List
 from dataclasses import dataclass
 from enum import Enum
 
@@ -22,6 +22,10 @@ class EventType(Enum):
     PLAN_CREATED = "plan_created"
     PLAN_STEP_START = "plan_step_start"
     PLAN_STEP_COMPLETE = "plan_step_complete"
+    REFLECTION_START = "reflection_start"
+    REFLECTION_CRITIQUE = "reflection_critique"
+    REFLECTION_REFINEMENT = "reflection_refinement"
+    REFLECTION_COMPLETE = "reflection_complete"
     ERROR = "error"
     COMPLETE = "complete"
 
@@ -39,8 +43,8 @@ class StreamingEvent:
 class StreamingReactAgent(ReactAgent):
     """React Agent that emits real-time thinking events."""
     
-    def __init__(self, verbose: bool = True, mode: str = "hybrid"):
-        super().__init__(verbose, mode)
+    def __init__(self, verbose: bool = True, mode: str = "hybrid", enable_reflection: bool = True):
+        super().__init__(verbose, mode, enable_reflection=enable_reflection)
         self._event_queue = None
         self._current_step = 0
     
@@ -247,14 +251,104 @@ class StreamingReactAgent(ReactAgent):
             })
         
         return result_state
+    
+    async def _reflect_node(self, state: AgentState) -> AgentState:
+        """Reflection node with event emission."""
+        # Check if reflection is enabled
+        if not self.reflection_module:
+            return state
+            
+        # Emit reflection start event
+        await self._emit_event(EventType.REFLECTION_START, {
+            "original_response": state.get("output", ""),
+            "quality_threshold": self.reflection_module.quality_threshold,
+            "step": self._current_step
+        })
+        
+        # Call the original reflection node
+        result_state = await super()._reflect_node(state)
+        
+        # Extract reflection metadata from the result
+        reflection_metadata = result_state.get("metadata", {}).get("reflection", {})
+        
+        if reflection_metadata:
+            # Emit reflection critique events for each iteration
+            reflection_history = reflection_metadata.get("reflection_history", [])
+            for iteration_data in reflection_history:
+                critique = iteration_data.get("critique")
+                if critique:
+                    # Handle both CritiqueResult objects and dictionaries
+                    if hasattr(critique, '__dict__'):
+                        critique_data = {
+                            "overall_quality": critique.overall_quality,
+                            "confidence": critique.confidence,
+                            "issues_count": len(critique.issues),
+                            "strengths_count": len(critique.strengths),
+                            "needs_refinement": critique.needs_refinement,
+                            "reasoning": critique.reasoning,
+                            "issues": [
+                                {
+                                    "type": issue.type.value if hasattr(issue.type, 'value') else str(issue.type),
+                                    "severity": issue.severity.value if hasattr(issue.severity, 'value') else str(issue.severity),
+                                    "description": issue.description,
+                                    "suggestion": issue.suggestion,
+                                    "confidence": issue.confidence
+                                } for issue in critique.issues
+                            ],
+                            "strengths": critique.strengths
+                        }
+                    else:
+                        # Dictionary fallback
+                        critique_data = {
+                            "overall_quality": critique.get("overall_quality", 0.0),
+                            "confidence": critique.get("confidence", 0.0),
+                            "issues_count": len(critique.get("issues", [])),
+                            "strengths_count": len(critique.get("strengths", [])),
+                            "needs_refinement": critique.get("needs_refinement", False),
+                            "reasoning": critique.get("reasoning", ""),
+                            "issues": critique.get("issues", []),
+                            "strengths": critique.get("strengths", [])
+                        }
+                    
+                    await self._emit_event(EventType.REFLECTION_CRITIQUE, {
+                        "iteration": iteration_data.get("iteration", 1),
+                        "critique": critique_data,
+                        "step": self._current_step
+                    })
+            
+            # Emit refinement events if improvements were made
+            improvements = reflection_metadata.get("total_improvements", [])
+            if improvements:
+                await self._emit_event(EventType.REFLECTION_REFINEMENT, {
+                    "improvements": improvements,
+                    "quality_improvement": reflection_metadata.get("final_quality_score", 0.0) - 0.5,  # Rough estimate
+                    "original_response": state.get("original_response", ""),
+                    "refined_response": result_state.get("output", ""),
+                    "step": self._current_step
+                })
+        
+        # Emit reflection complete event
+        await self._emit_event(EventType.REFLECTION_COMPLETE, {
+            "final_quality_score": reflection_metadata.get("final_quality_score", 0.0),
+            "reflection_iterations": reflection_metadata.get("reflection_iterations", 0),
+            "threshold_met": reflection_metadata.get("threshold_met", False),
+            "total_improvements": len(reflection_metadata.get("total_improvements", [])),
+            "step": self._current_step
+        })
+        
+        return result_state
 
 
 class StreamingChatbot:
     """Chatbot interface that supports streaming responses."""
     
-    def __init__(self, verbose: bool = False, mode: str = "hybrid"):
-        self.agent = StreamingReactAgent(verbose=verbose, mode=mode)
+    def __init__(self, verbose: bool = False, mode: str = "hybrid", enable_reflection: bool = True):
+        self.agent = StreamingReactAgent(verbose=verbose, mode=mode, enable_reflection=enable_reflection)
         self.conversation_history = []
+        
+        # Connect this chatbot instance to the tool manager so the conversation history tool can access it
+        if hasattr(self.agent, 'tool_manager'):
+            self.agent.tool_manager.set_chatbot_instance(self)
     
     async def chat_stream(self, message: str) -> AsyncGenerator[StreamingEvent, None]:
         """Process a chat message and yield real-time events."""
@@ -265,12 +359,18 @@ class StreamingChatbot:
                 # If this is the completion event, add to history
                 if event.type == EventType.COMPLETE:
                     response = event.data["response"]
-                    self.conversation_history.append({
+                    # Add to conversation history
+                    conversation_entry = {
                         "user": message,
                         "assistant": response["output"],
                         "success": response["success"],
-                        "steps": len(response["steps"])
-                    })
+                        "steps": len(response["steps"]),
+                        "timestamp": time.time()
+                    }
+                    self.conversation_history.append(conversation_entry)
+                    
+                    # Also notify the conversation history tool (backup method)
+                    self._notify_conversation_tool(conversation_entry)
                     
         except Exception as e:
             # Yield error event
@@ -284,12 +384,18 @@ class StreamingChatbot:
                 step=0
             )
             
-            self.conversation_history.append({
+            # Add error to conversation history
+            error_entry = {
                 "user": message,
                 "assistant": f"Error: {str(e)}",
                 "success": False,
-                "steps": 0
-            })
+                "steps": 0,
+                "timestamp": time.time()
+            }
+            self.conversation_history.append(error_entry)
+            
+            # Also notify the conversation history tool (backup method)
+            self._notify_conversation_tool(error_entry)
     
     def get_stats(self) -> Dict[str, Any]:
         """Get chatbot statistics."""
@@ -305,3 +411,34 @@ class StreamingChatbot:
     def clear_history(self):
         """Clear conversation history."""
         self.conversation_history.clear()
+        
+        # Also clear the conversation history tool's cache
+        if hasattr(self.agent, 'tool_manager'):
+            conversation_tool = self.agent.tool_manager.get_tool("conversation_history")
+            if conversation_tool:
+                conversation_tool._conversation_cache.clear()
+    
+    def _notify_conversation_tool(self, conversation_entry: Dict[str, Any]):
+        """Notify the conversation history tool about new conversation (backup method)."""
+        try:
+            if hasattr(self.agent, 'tool_manager'):
+                conversation_tool = self.agent.tool_manager.get_tool("conversation_history")
+                if conversation_tool and not hasattr(conversation_tool, 'chatbot_instance'):
+                    # Only use cache if tool doesn't have chatbot instance
+                    conversation_tool.add_conversation_to_cache(
+                        conversation_entry["user"],
+                        conversation_entry["assistant"],
+                        conversation_entry["success"],
+                        conversation_entry["steps"]
+                    )
+        except Exception as e:
+            # Silently fail - this is just a backup method
+            pass
+    
+    def get_conversation_count(self) -> int:
+        """Get the number of conversations in history."""
+        return len(self.conversation_history)
+    
+    def get_recent_conversations(self, count: int = 5) -> List[Dict[str, Any]]:
+        """Get recent conversations."""
+        return self.conversation_history[-count:] if self.conversation_history else []

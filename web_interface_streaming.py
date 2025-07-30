@@ -429,8 +429,23 @@ def main():
             "Analyze the benefits of renewable energy sources"
         ]
         
+        # Conversation history examples
+        st.header("🗨️ Conversation History Examples")
+        history_examples = [
+            "What did we discuss before?",
+            "Show me the last 3 conversations",
+            "What was my previous question about?",
+            "Can you show me the last calculation result?",
+            "What topics have we covered in this session?"
+        ]
+        
         for example in examples:
             if st.button(f"📝 {example[:30]}...", key=f"example_{hash(example)}"):
+                st.session_state.example_query = example
+                st.rerun()
+        
+        for example in history_examples:
+            if st.button(f"💬 {example[:30]}...", key=f"history_{hash(example)}"):
                 st.session_state.example_query = example
                 st.rerun()
     

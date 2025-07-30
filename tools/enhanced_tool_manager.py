@@ -3,6 +3,7 @@
 from typing import Any, Dict, List, Optional
 from tools import DatabaseTool, WikipediaTool, WebSearchTool, CalculatorTool, CppExecutorTool, CommandLineTool, FileManagerTool
 from tools.base_tool import BaseTool, ToolResult
+from tools.conversation_history_tool import ConversationHistoryTool
 from mysql_config import MySQLConfig
 import logging
 
@@ -19,10 +20,12 @@ logger = logging.getLogger(__name__)
 class EnhancedToolManager:
     """Enhanced tool manager with support for both in-memory and MySQL databases."""
     
-    def __init__(self, use_mysql: bool = False, mysql_config: Optional[Dict[str, Any]] = None):
+    def __init__(self, use_mysql: bool = False, mysql_config: Optional[Dict[str, Any]] = None, 
+                 chatbot_instance=None):
         self.tools: Dict[str, BaseTool] = {}
         self.use_mysql = use_mysql
         self.mysql_config = mysql_config or MySQLConfig.get_config()
+        self.chatbot_instance = chatbot_instance
         self._initialize_tools()
     
     def _initialize_tools(self):
@@ -57,6 +60,10 @@ class EnhancedToolManager:
             # Use in-memory database tool
             tools.append(DatabaseTool())
             logger.info("✅ In-memory Database Tool initialized")
+        
+        # Add conversation history tool
+        conversation_tool = ConversationHistoryTool(self.chatbot_instance)
+        tools.append(conversation_tool)
         
         # Add other tools
         tools.extend([
@@ -210,6 +217,15 @@ class EnhancedToolManager:
             status["database"] = db_tool.mysql.database
         
         return status
+    
+    def set_chatbot_instance(self, chatbot_instance):
+        """Set the chatbot instance for the conversation history tool."""
+        self.chatbot_instance = chatbot_instance
+        
+        # Update the conversation history tool if it exists
+        conversation_tool = self.get_tool("conversation_history")
+        if conversation_tool:
+            conversation_tool.set_chatbot_instance(chatbot_instance)
     
     def __str__(self) -> str:
         """String representation of the tool manager."""
