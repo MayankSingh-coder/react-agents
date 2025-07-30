@@ -61,14 +61,50 @@ class CommandLineTool(BaseTool):
         'iptables', 'ufw', 'firewall-cmd',
     }
     
-    def __init__(self, working_directory: Optional[str] = None, timeout: int = 30):
+    # Default prohibited directories (can be overridden)
+    DEFAULT_PROHIBITED_DIRECTORIES = {
+        # System directories
+        '/etc', '/bin', '/sbin', '/usr/bin', '/usr/sbin', '/boot',
+        '/sys', '/proc', '/dev', '/root',
+        
+        # macOS system directories
+        '/System', '/Library', '/Applications', '/private/etc', '/private/var/log', '/private/var/run',
+        
+        # Windows system directories
+        'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)',
+        'C:\\System32', 'C:\\SysWOW64',
+        
+        # Other sensitive directories
+        '/var/log', '/var/run', '/var/lib', '/opt/local',
+        '/usr/local/bin', '/usr/local/sbin'
+    }
+    
+    def __init__(self, working_directory: Optional[str] = None, timeout: int = 30, 
+                 safe_mode: bool = True, prohibited_directories: Optional[set] = None,
+                 use_dynamic_cwd: bool = True):
         super().__init__(
             name="command_line",
             description=self._get_detailed_description()
         )
-        self.working_directory = working_directory or os.getcwd()
+        self.working_directory = working_directory
+        self.use_dynamic_cwd = use_dynamic_cwd
         self.timeout = timeout
         self.system = platform.system().lower()
+        self.safe_mode = safe_mode
+        
+        # Set prohibited directories
+        if prohibited_directories is not None:
+            self.prohibited_directories = prohibited_directories
+        else:
+            self.prohibited_directories = self.DEFAULT_PROHIBITED_DIRECTORIES.copy()
+        
+        # If not using dynamic cwd and working directory is specified, ensure it's safe
+        if not self.use_dynamic_cwd and self.working_directory:
+            if self.safe_mode and not self._is_safe_working_directory():
+                # Fall back to a safe directory
+                safe_dir = self._get_safe_fallback_directory()
+                print(f"⚠️  Working directory {self.working_directory} is not safe, using {safe_dir}")
+                self.working_directory = safe_dir
     
     def _get_detailed_description(self) -> str:
         """Get detailed description with examples for command line operations."""
@@ -107,8 +143,11 @@ SECURITY FEATURES:
 - Whitelist of safe commands only
 - Blocked dangerous operations (rm, sudo, etc.)
 - Timeout protection (30 seconds default)
-- Working directory isolation
+- Dynamic working directory detection (uses current directory by default)
+- Working directory isolation and validation
+- Prohibited directory path protection
 - Output size limits
+- Safe mode with automatic fallback directories
 
 USAGE EXAMPLES:
 - "ls -la" → List files with details
@@ -134,6 +173,95 @@ COMMON USE CASES:
 - Check software versions
 - Basic development operations"""
     
+    def _get_current_working_directory(self) -> str:
+        """Get the current working directory, either dynamic or fixed."""
+        if self.use_dynamic_cwd:
+            return os.getcwd()
+        elif self.working_directory:
+            return self.working_directory
+        else:
+            return os.getcwd()
+    
+    def _is_safe_working_directory(self, working_dir: Optional[str] = None) -> bool:
+        """Check if the specified working directory is safe."""
+        if not self.safe_mode:
+            return True
+        
+        try:
+            if working_dir is None:
+                working_dir = self._get_current_working_directory()
+            
+            abs_working_dir = os.path.abspath(working_dir)
+            
+            # Check against prohibited directories
+            for prohibited in self.prohibited_directories:
+                if abs_working_dir.startswith(prohibited):
+                    return False
+            
+            return True
+        except Exception:
+            return False
+    
+    def _get_safe_fallback_directory(self) -> str:
+        """Get a safe fallback directory."""
+        safe_options = [
+            os.path.expanduser("~"),  # User home directory
+            "/tmp",  # Temp directory (Unix)
+            "/var/tmp",  # Alternative temp (Unix)
+            os.path.join(os.path.expanduser("~"), "Documents"),  # User documents
+            os.getcwd()  # Current directory as last resort
+        ]
+        
+        for option in safe_options:
+            if os.path.exists(option) and os.path.isdir(option):
+                abs_option = os.path.abspath(option)
+                # Check if this directory is safe
+                is_safe = True
+                for prohibited in self.prohibited_directories:
+                    if abs_option.startswith(prohibited):
+                        is_safe = False
+                        break
+                
+                if is_safe:
+                    return abs_option
+        
+        # If all else fails, use temp directory
+        return tempfile.gettempdir()
+    
+    def _is_command_path_safe(self, command: str) -> bool:
+        """Check if command involves safe paths only."""
+        if not self.safe_mode:
+            return True
+        
+        # Extract potential paths from command
+        import shlex
+        try:
+            parts = shlex.split(command)
+        except ValueError:
+            # If we can't parse it safely, be conservative
+            return False
+        
+        for part in parts:
+            # Skip flags and options
+            if part.startswith('-'):
+                continue
+            
+            # Check if this looks like a path
+            if '/' in part or '\\' in part:
+                # Resolve relative paths
+                if not os.path.isabs(part):
+                    current_wd = self._get_current_working_directory()
+                    part = os.path.join(current_wd, part)
+                
+                abs_path = os.path.abspath(part)
+                
+                # Check against prohibited directories
+                for prohibited in self.prohibited_directories:
+                    if abs_path.startswith(prohibited):
+                        return False
+        
+        return True
+    
     async def execute(self, query: str, **kwargs) -> ToolResult:
         """Execute command line operation safely."""
         try:
@@ -146,6 +274,16 @@ COMMON USE CASES:
                     error="Empty command provided"
                 )
             
+            # Get current working directory
+            current_wd = self._get_current_working_directory()
+            
+            # Check if current working directory is safe
+            if not self._is_safe_working_directory(current_wd):
+                # Fall back to a safe directory
+                safe_dir = self._get_safe_fallback_directory()
+                print(f"⚠️  Current working directory {current_wd} is not safe, using {safe_dir}")
+                current_wd = safe_dir
+            
             # Security check
             security_check = self._security_check(command)
             if not security_check["allowed"]:
@@ -155,8 +293,16 @@ COMMON USE CASES:
                     error=f"Command blocked for security: {security_check['reason']}"
                 )
             
+            # Path safety check
+            if not self._is_command_path_safe(command):
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error="Command blocked: involves prohibited directory paths"
+                )
+            
             # Execute the command
-            result = await self._execute_command(command)
+            result = await self._execute_command(command, working_directory=current_wd)
             
             return ToolResult(
                 success=result["success"],
@@ -166,7 +312,7 @@ COMMON USE CASES:
                     "stderr": result["stderr"],
                     "return_code": result["return_code"],
                     "execution_time": result["execution_time"],
-                    "working_directory": self.working_directory
+                    "working_directory": current_wd
                 },
                 error=result.get("error"),
                 metadata={
@@ -232,10 +378,13 @@ COMMON USE CASES:
         except Exception as e:
             return {"allowed": False, "reason": f"Security check failed: {str(e)}"}
     
-    async def _execute_command(self, command: str) -> Dict[str, Any]:
+    async def _execute_command(self, command: str, working_directory: Optional[str] = None) -> Dict[str, Any]:
         """Execute the command asynchronously with timeout."""
         import time
         start_time = time.time()
+        
+        # Use provided working directory or fall back to instance working directory
+        cwd = working_directory or self._get_current_working_directory()
         
         try:
             # Create subprocess
@@ -243,7 +392,7 @@ COMMON USE CASES:
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=self.working_directory,
+                cwd=cwd,
                 env=os.environ.copy()
             )
             
@@ -327,7 +476,15 @@ COMMON USE CASES:
         """Set the working directory for command execution."""
         try:
             if os.path.isdir(directory):
-                self.working_directory = os.path.abspath(directory)
+                abs_directory = os.path.abspath(directory)
+                
+                # Check if directory is safe in safe mode
+                if self.safe_mode:
+                    for prohibited in self.prohibited_directories:
+                        if abs_directory.startswith(prohibited):
+                            return False
+                
+                self.working_directory = abs_directory
                 return True
             return False
         except Exception:
@@ -344,3 +501,72 @@ COMMON USE CASES:
     def get_blocked_commands(self) -> List[str]:
         """Get list of blocked commands."""
         return sorted(list(self.BLOCKED_COMMANDS))
+    
+    def get_prohibited_directories(self) -> List[str]:
+        """Get list of prohibited directories."""
+        return sorted(list(self.prohibited_directories))
+    
+    def add_prohibited_directory(self, directory: str) -> bool:
+        """Add a directory to the prohibited list."""
+        try:
+            abs_dir = os.path.abspath(directory)
+            self.prohibited_directories.add(abs_dir)
+            
+            # If current working directory becomes prohibited, change it
+            if self.safe_mode and not self._is_safe_working_directory():
+                safe_dir = self._get_safe_fallback_directory()
+                self.working_directory = safe_dir
+                print(f"⚠️  Working directory changed to {safe_dir} due to new prohibition")
+            
+            return True
+        except Exception:
+            return False
+    
+    def remove_prohibited_directory(self, directory: str) -> bool:
+        """Remove a directory from the prohibited list."""
+        try:
+            abs_dir = os.path.abspath(directory)
+            if abs_dir in self.prohibited_directories:
+                self.prohibited_directories.remove(abs_dir)
+                return True
+            return False
+        except Exception:
+            return False
+    
+    def set_prohibited_directories(self, directories: set) -> bool:
+        """Set the entire prohibited directories list."""
+        try:
+            self.prohibited_directories = {os.path.abspath(d) for d in directories}
+            
+            # Check if current working directory is still safe
+            if self.safe_mode and not self._is_safe_working_directory():
+                safe_dir = self._get_safe_fallback_directory()
+                self.working_directory = safe_dir
+                print(f"⚠️  Working directory changed to {safe_dir} due to new prohibitions")
+            
+            return True
+        except Exception:
+            return False
+    
+    def reset_prohibited_directories(self) -> None:
+        """Reset prohibited directories to default."""
+        self.prohibited_directories = self.DEFAULT_PROHIBITED_DIRECTORIES.copy()
+        
+        # Check if current working directory is still safe
+        if self.safe_mode and not self._is_safe_working_directory():
+            safe_dir = self._get_safe_fallback_directory()
+            self.working_directory = safe_dir
+            print(f"⚠️  Working directory changed to {safe_dir} after reset")
+    
+    def toggle_safe_mode(self, enabled: bool) -> None:
+        """Toggle safe mode on/off."""
+        self.safe_mode = enabled
+        
+        if enabled and not self._is_safe_working_directory():
+            safe_dir = self._get_safe_fallback_directory()
+            self.working_directory = safe_dir
+            print(f"⚠️  Safe mode enabled, working directory changed to {safe_dir}")
+    
+    def is_safe_mode_enabled(self) -> bool:
+        """Check if safe mode is enabled."""
+        return self.safe_mode

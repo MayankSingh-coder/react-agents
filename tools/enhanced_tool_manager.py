@@ -1,7 +1,7 @@
 """Enhanced Tool Manager with MySQL Database Support."""
 
 from typing import Any, Dict, List, Optional
-from tools import DatabaseTool, WikipediaTool, WebSearchTool, CalculatorTool, CppExecutorTool, CommandLineTool
+from tools import DatabaseTool, WikipediaTool, WebSearchTool, CalculatorTool, CppExecutorTool, CommandLineTool, FileManagerTool
 from tools.mysql_database_tool import MySQLDatabaseTool
 from tools.base_tool import BaseTool, ToolResult
 from mysql_config import MySQLConfig
@@ -55,7 +55,8 @@ class EnhancedToolManager:
             WebSearchTool(),
             CalculatorTool(),
             CppExecutorTool(),
-            CommandLineTool()
+            CommandLineTool(),
+            FileManagerTool()
         ])
         
         # Register all tools

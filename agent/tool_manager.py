@@ -1,7 +1,7 @@
 """Tool manager for the React Agent."""
 
 from typing import Any, Dict, List, Optional
-from tools import DatabaseTool, WikipediaTool, WebSearchTool, CalculatorTool, CppExecutorTool, CommandLineTool
+from tools import DatabaseTool, WikipediaTool, WebSearchTool, CalculatorTool, CppExecutorTool, CommandLineTool, FileManagerTool
 from tools.base_tool import BaseTool, ToolResult
 
 
@@ -20,7 +20,8 @@ class ToolManager:
             WebSearchTool(),
             CalculatorTool(),
             CppExecutorTool(),
-            CommandLineTool()
+            CommandLineTool(),
+            FileManagerTool()
         ]
         
         for tool in tools:
