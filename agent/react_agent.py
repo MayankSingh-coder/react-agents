@@ -22,6 +22,8 @@ from .planner import Planner, Plan, PlanType
 from .executor import PlanExecutor, ExecutionStatus
 from .adaptive_replanner import AdaptiveReplanner, AdaptationContext, ReplanDecision
 from .reflection_module import ReflectionModule
+from .reflection_factory import ReflectionFactory, ReflectionStrategy
+from .dynamic_reflection_selector import get_dynamic_selector
 from memory import MemoryStore, ContextManager, VectorMemory, EpisodicMemory
 from memory.memory_store import MemoryType
 from memory.context_manager import ReasoningStep, ToolContext
@@ -36,10 +38,15 @@ class ReactAgent:
     """React Agent that implements the Thought-Action-Observation pattern."""
     
     def __init__(self, verbose: bool = True, mode: str = "hybrid", use_mysql: bool = True, 
-                 enable_reflection: bool = True, reflection_quality_threshold: float = 0.7):
+                 enable_reflection: bool = True, reflection_quality_threshold: float = 0.7,
+                 reflection_strategy: ReflectionStrategy = ReflectionStrategy.BALANCED,
+                 enable_dynamic_strategy: bool = False, user_preferences: dict = None):
         self.verbose = verbose
         self.mode = mode  # "react", "plan_execute", or "hybrid"
         self.enable_reflection = enable_reflection
+        self.enable_dynamic_strategy = enable_dynamic_strategy
+        self.user_preferences = user_preferences or {}
+        self.default_reflection_strategy = reflection_strategy
         
         # Configure MySQL with root user and password
         mysql_config = {
@@ -72,12 +79,24 @@ class ReactAgent:
         # Initialize adaptive replanner for enhanced hybrid approach
         self.adaptive_replanner = AdaptiveReplanner(self.planner, self.tool_manager, self.context_manager)
         
-        # Initialize reflection module
-        self.reflection_module = ReflectionModule(
-            quality_threshold=reflection_quality_threshold,
-            max_refinement_iterations=3,
-            verbose=self.verbose
-        ) if enable_reflection else None
+        # Initialize reflection system
+        if enable_reflection:
+            if enable_dynamic_strategy:
+                # Dynamic strategy - will create modules on-demand
+                self.reflection_module = None
+                self.dynamic_selector = get_dynamic_selector()
+                self.reflection_quality_threshold = reflection_quality_threshold
+            else:
+                # Fixed strategy - create module once
+                self.reflection_module = ReflectionFactory.create_reflection_module(
+                    strategy=reflection_strategy,
+                    quality_threshold=reflection_quality_threshold,
+                    verbose=self.verbose
+                )
+                self.dynamic_selector = None
+        else:
+            self.reflection_module = None
+            self.dynamic_selector = None
         
         # Legacy memory for backward compatibility
         self.memory = AgentMemory()

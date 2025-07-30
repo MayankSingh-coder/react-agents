@@ -164,6 +164,60 @@ class ThinkingDisplay:
         elif event.type == EventType.PLAN_STEP_COMPLETE:
             st.markdown(f"**{timestamp}** - ✅ **Plan Execution Complete**")
             
+        elif event.type == EventType.STRATEGY_SELECTION:
+            query = event.data.get("query", "")
+            status = event.data.get("status", "")
+            method = event.data.get("method", "")
+            
+            if status == "analyzing":
+                st.markdown(f"**{timestamp}** - 🧠 **Analyzing Query for Optimal Strategy**")
+                st.markdown(f"**Method:** {method.upper()}")
+                query_preview = query[:60] + "..." if len(query) > 60 else query
+                st.markdown(f"**Query:** {query_preview}")
+                
+            elif status == "completed":
+                selected_strategy = event.data.get("selected_strategy", "")
+                reasoning = event.data.get("reasoning", "")
+                confidence = event.data.get("confidence", 0.0)
+                selection_time = event.data.get("selection_time", 0.0)
+                complexity_score = event.data.get("complexity_score", 0.0)
+                urgency_score = event.data.get("urgency_score", 0.0)
+                criticality_score = event.data.get("criticality_score", 0.0)
+                key_factors = event.data.get("key_factors", [])
+                
+                st.markdown(f"**{timestamp}** - 🎯 **Strategy Selected: {selected_strategy}**")
+                
+                # Show confidence with color coding
+                if confidence >= 0.8:
+                    st.success(f"**Confidence:** {confidence:.2f} (High)")
+                elif confidence >= 0.6:
+                    st.info(f"**Confidence:** {confidence:.2f} (Medium)")
+                else:
+                    st.warning(f"**Confidence:** {confidence:.2f} (Low)")
+                
+                st.markdown(f"**Selection Time:** {selection_time:.3f}s")
+                st.markdown(f"**Method:** {method.upper()}")
+                
+                # Show analysis scores
+                if complexity_score > 0 or urgency_score > 0 or criticality_score > 0:
+                    st.markdown("**Analysis Scores:**")
+                    if complexity_score > 0:
+                        st.markdown(f"  • Complexity: {complexity_score:.2f}")
+                    if urgency_score > 0:
+                        st.markdown(f"  • Urgency: {urgency_score:.2f}")
+                    if criticality_score > 0:
+                        st.markdown(f"  • Criticality: {criticality_score:.2f}")
+                
+                # Show reasoning
+                if reasoning:
+                    st.markdown(f"**Reasoning:** {reasoning}")
+                
+                # Show key factors
+                if key_factors:
+                    st.markdown("**Key Decision Factors:**")
+                    for factor in key_factors:
+                        st.markdown(f"  • {factor}")
+            
         elif event.type == EventType.REFLECTION_START:
             original_response = event.data.get("original_response", "")
             quality_threshold = event.data.get("quality_threshold", 0.7)
@@ -277,6 +331,16 @@ async def run_streaming_chat(chatbot: StreamingChatbot, prompt: str, thinking_di
                 steps_count = len(plan.get("steps", []))
                 thinking_display.update_status(f"Created plan with {steps_count} steps", "thinking")
                 
+            elif event.type == EventType.STRATEGY_SELECTION:
+                status = event.data.get("status", "")
+                if status == "analyzing":
+                    method = event.data.get("method", "")
+                    thinking_display.update_status(f"🧠 Analyzing query complexity ({method})...", "thinking")
+                elif status == "completed":
+                    selected_strategy = event.data.get("selected_strategy", "")
+                    confidence = event.data.get("confidence", 0.0)
+                    thinking_display.update_status(f"🎯 Selected {selected_strategy} strategy (confidence: {confidence:.2f})", "success")
+                
             elif event.type == EventType.REFLECTION_START:
                 thinking_display.update_status("Starting reflection and self-critique...", "thinking")
                 
@@ -342,7 +406,7 @@ st.set_page_config(
 
 # Initialize session state
 if "chatbot" not in st.session_state:
-    st.session_state.chatbot = StreamingChatbot(verbose=False, mode="hybrid", enable_reflection=True)
+    st.session_state.chatbot = StreamingChatbot(verbose=False, mode="hybrid", enable_reflection=True, enable_llm_strategy_selection=True)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "show_thinking" not in st.session_state:
@@ -379,8 +443,31 @@ def main():
             help="Enable self-critique and response refinement"
         )
         
-        if mode != st.session_state.chatbot.agent.mode or enable_reflection != getattr(st.session_state.chatbot.agent, 'enable_reflection', True):
-            st.session_state.chatbot = StreamingChatbot(verbose=False, mode=mode, enable_reflection=enable_reflection)
+        # LLM Strategy Selection settings
+        enable_llm_strategy = st.checkbox(
+            "🧠 LLM-Based Strategy Selection",
+            value=True,
+            help="Use AI to intelligently select reflection strategies instead of regex patterns"
+        )
+        
+        if not enable_llm_strategy:
+            st.info("🔄 Using regex-based strategy selection (faster but less accurate)")
+        else:
+            st.success("🧠 Using LLM-based strategy selection (smarter but slower)")
+        
+        # Check if settings changed
+        current_llm_strategy = getattr(st.session_state.chatbot.agent, 'enable_llm_strategy_selection', True)
+        
+        if (mode != st.session_state.chatbot.agent.mode or 
+            enable_reflection != getattr(st.session_state.chatbot.agent, 'enable_reflection', True) or
+            enable_llm_strategy != current_llm_strategy):
+            
+            st.session_state.chatbot = StreamingChatbot(
+                verbose=False, 
+                mode=mode, 
+                enable_reflection=enable_reflection,
+                enable_llm_strategy_selection=enable_llm_strategy
+            )
             st.rerun()
         
         # Real-time thinking toggle

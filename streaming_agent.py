@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 from agent.react_agent import ReactAgent
+from agent.llm_enhanced_react_agent import LLMEnhancedReactAgent
+from agent.reflection_factory import ReflectionStrategy
 from agent.agent_state import AgentState
 
 
@@ -22,6 +24,7 @@ class EventType(Enum):
     PLAN_CREATED = "plan_created"
     PLAN_STEP_START = "plan_step_start"
     PLAN_STEP_COMPLETE = "plan_step_complete"
+    STRATEGY_SELECTION = "strategy_selection"
     REFLECTION_START = "reflection_start"
     REFLECTION_CRITIQUE = "reflection_critique"
     REFLECTION_REFINEMENT = "reflection_refinement"
@@ -40,11 +43,21 @@ class StreamingEvent:
     metadata: Optional[Dict[str, Any]] = None
 
 
-class StreamingReactAgent(ReactAgent):
-    """React Agent that emits real-time thinking events."""
+class StreamingReactAgent(LLMEnhancedReactAgent):
+    """LLM-Enhanced React Agent that emits real-time thinking events with intelligent strategy selection."""
     
-    def __init__(self, verbose: bool = True, mode: str = "hybrid", enable_reflection: bool = True):
-        super().__init__(verbose, mode, enable_reflection=enable_reflection)
+    def __init__(self, verbose: bool = True, mode: str = "hybrid", enable_reflection: bool = True,
+                 enable_llm_strategy_selection: bool = True, 
+                 reflection_strategy: ReflectionStrategy = ReflectionStrategy.BALANCED,
+                 user_preferences: dict = None):
+        super().__init__(
+            verbose=verbose, 
+            mode=mode, 
+            enable_reflection=enable_reflection,
+            enable_llm_strategy_selection=enable_llm_strategy_selection,
+            reflection_strategy=reflection_strategy,
+            user_preferences=user_preferences or {}
+        )
         self._event_queue = None
         self._current_step = 0
     
@@ -253,20 +266,51 @@ class StreamingReactAgent(ReactAgent):
         return result_state
     
     async def _reflect_node(self, state: AgentState) -> AgentState:
-        """Reflection node with event emission."""
+        """Enhanced reflection node with LLM strategy selection and event emission."""
         # Check if reflection is enabled
-        if not self.reflection_module:
+        if not self.enable_reflection:
             return state
             
-        # Emit reflection start event
+        # Get original query for strategy selection
+        original_query = state.get("input", "")
+        
+        # Emit strategy selection event if LLM selection is enabled
+        if self.enable_llm_strategy_selection and original_query:
+            await self._emit_event(EventType.STRATEGY_SELECTION, {
+                "query": original_query,
+                "status": "analyzing",
+                "method": "llm" if not self.use_hybrid_selection else "hybrid",
+                "step": self._current_step
+            })
+        
+        # Emit reflection start event  
         await self._emit_event(EventType.REFLECTION_START, {
             "original_response": state.get("output", ""),
-            "quality_threshold": self.reflection_module.quality_threshold,
+            "quality_threshold": self.reflection_quality_threshold,
             "step": self._current_step
         })
         
-        # Call the original reflection node
+        # Call the enhanced reflection node (which includes strategy selection)
         result_state = await super()._reflect_node(state)
+        
+        # If strategy selection occurred, emit the results
+        llm_strategy_metadata = result_state.get("metadata", {}).get("llm_strategy_selection", {})
+        if llm_strategy_metadata:
+            selection_metadata = llm_strategy_metadata.get("selection_metadata", {})
+            await self._emit_event(EventType.STRATEGY_SELECTION, {
+                "query": original_query,
+                "status": "completed",
+                "selected_strategy": llm_strategy_metadata.get("selected_strategy"),
+                "method": selection_metadata.get("method", "unknown"),
+                "reasoning": selection_metadata.get("reasoning", ""),
+                "confidence": selection_metadata.get("confidence", 0.0),
+                "selection_time": selection_metadata.get("selection_time", 0.0),
+                "complexity_score": selection_metadata.get("complexity_score", 0.0),
+                "urgency_score": selection_metadata.get("urgency_score", 0.0),
+                "criticality_score": selection_metadata.get("criticality_score", 0.0),
+                "key_factors": selection_metadata.get("key_factors", []),
+                "step": self._current_step
+            })
         
         # Extract reflection metadata from the result
         reflection_metadata = result_state.get("metadata", {}).get("reflection", {})
@@ -342,8 +386,16 @@ class StreamingReactAgent(ReactAgent):
 class StreamingChatbot:
     """Chatbot interface that supports streaming responses."""
     
-    def __init__(self, verbose: bool = False, mode: str = "hybrid", enable_reflection: bool = True):
-        self.agent = StreamingReactAgent(verbose=verbose, mode=mode, enable_reflection=enable_reflection)
+    def __init__(self, verbose: bool = False, mode: str = "hybrid", enable_reflection: bool = True,
+                 enable_llm_strategy_selection: bool = True, 
+                 reflection_strategy: ReflectionStrategy = ReflectionStrategy.BALANCED):
+        self.agent = StreamingReactAgent(
+            verbose=verbose, 
+            mode=mode, 
+            enable_reflection=enable_reflection,
+            enable_llm_strategy_selection=enable_llm_strategy_selection,
+            reflection_strategy=reflection_strategy
+        )
         self.conversation_history = []
         
         # Connect this chatbot instance to the tool manager so the conversation history tool can access it
