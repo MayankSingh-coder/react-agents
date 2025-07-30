@@ -108,20 +108,42 @@ class CommandLineTool(BaseTool):
     
     def _get_detailed_description(self) -> str:
         """Get detailed description with examples for command line operations."""
-        return """Execute command line operations safely with security restrictions.
+        # Get current directory safely (may be called during initialization)
+        try:
+            current_dir = self._get_current_working_directory()
+        except AttributeError:
+            # Fallback if called during initialization before attributes are set
+            current_dir = os.getcwd()
+        
+        return f"""Execute command line operations safely with security restrictions.
+
+DEFAULT WORKING DIRECTORY:
+• Current Directory: {current_dir}
+• All relative paths operate from this directory
+• To access files outside this directory, use FULL ABSOLUTE PATHS
+• Example: Use "/Users/username/Documents/file.txt" instead of "../../Documents/file.txt"
+
+DIRECTORY ACCESS RULES:
+• Relative paths: Limited to current directory and subdirectories
+• Absolute paths: Use full path to access any allowed directory
+• Prohibited paths: System directories are blocked for security
+• Safe directories: User home, Documents, temporary directories
 
 SUPPORTED OPERATIONS:
 • File Operations:
   - List files: ls, dir (Windows)
+    Examples: "ls -la", "ls /home/user/projects", "dir C:\\Users\\Username"
   - View files: cat, head, tail, less
+    Examples: "cat file.txt", "cat /full/path/to/file.txt"
   - Search: find, grep, locate
+    Examples: "find . -name '*.py'", "find /home/user -name '*.txt'"
   - Text processing: wc, sort, uniq, cut, awk, sed
   
 • System Information:
   - Process info: ps, top, htop
   - Disk usage: df, du
-  - Memory: free
-  - System: uname, hostname, whoami, date
+    Examples: "du -sh", "du -sh /full/path/to/directory"
+  - Memory: free, System: uname, hostname, whoami, date
   
 • Network Utilities:
   - Connectivity: ping, curl, wget
@@ -143,35 +165,51 @@ SECURITY FEATURES:
 - Whitelist of safe commands only
 - Blocked dangerous operations (rm, sudo, etc.)
 - Timeout protection (30 seconds default)
-- Dynamic working directory detection (uses current directory by default)
 - Working directory isolation and validation
 - Prohibited directory path protection
 - Output size limits
 - Safe mode with automatic fallback directories
 
-USAGE EXAMPLES:
-- "ls -la" → List files with details
-- "ps aux | grep python" → Find Python processes  
-- "curl -I https://google.com" → Check website headers
-- "git status" → Check git repository status
-- "python --version" → Check Python version
-- "df -h" → Check disk space
-- "ping -c 3 google.com" → Test connectivity
+PATH USAGE EXAMPLES:
+• Current Directory: 
+  - "ls -la" → List files in current directory
+  - "cat config.txt" → View file in current directory
+  - "find . -name '*.py'" → Search in current directory tree
+
+• Full Path Access:
+  - "ls -la /Users/username/Documents" → List files in Documents
+  - "cat /home/user/projects/readme.txt" → View specific file
+  - "find /Users/username -name '*.log'" → Search in user directory
+  - "du -sh /Applications" → Check size of Applications folder
+
+• System Information:
+  - "df -h" → Check disk space (all mounted drives)
+  - "ps aux | grep python" → Find Python processes
+  - "curl -I https://google.com" → Check website headers
+  - "git status" → Check git status (in current directory)
+  - "python --version" → Check Python version
 
 LIMITATIONS:
 - No destructive operations (rm, format, etc.)
 - No privilege escalation (sudo, su)
 - No system modification commands
+- System directories are prohibited for security
 - Timeout after 30 seconds
 - Output limited to prevent memory issues
 
+IMPORTANT NOTES:
+⚠️  Use FULL ABSOLUTE PATHS to access files outside the current directory
+⚠️  Relative paths like "../folder" may be blocked for security
+✅  Always specify complete paths: "/full/path/to/target"
+✅  Check current directory with "pwd" command first if unsure
+
 COMMON USE CASES:
 - Check system status and resources
-- Inspect files and directories
+- Inspect files and directories (current or specified paths)
 - Test network connectivity
 - View process information
 - Check software versions
-- Basic development operations"""
+- Basic development operations in current project"""
     
     def _get_current_working_directory(self) -> str:
         """Get the current working directory, either dynamic or fixed."""
