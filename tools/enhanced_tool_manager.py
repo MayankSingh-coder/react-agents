@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from tools import DatabaseTool, WikipediaTool, WebSearchTool, CalculatorTool, CppExecutorTool, CommandLineTool, FileManagerTool
 from tools.base_tool import BaseTool, ToolResult
 from tools.conversation_history_tool import ConversationHistoryTool
+from tools.file_explorer_tool import FileExplorerTool
 from mysql_config import MySQLConfig
 import logging
 
@@ -72,7 +73,8 @@ class EnhancedToolManager:
             CalculatorTool(),
             CppExecutorTool(),
             CommandLineTool(),
-            FileManagerTool()
+            FileManagerTool(),
+            FileExplorerTool(working_directory='*', safe_mode=True)  # Allow access to all paths with safety checks
         ])
         
         # Register all tools

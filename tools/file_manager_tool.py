@@ -23,18 +23,12 @@ class FileManagerTool(BaseTool):
     
     # Allowed file extensions for reading/writing
     SAFE_TEXT_EXTENSIONS = {
-        '.txt', '.md', '.json', '.csv', '.xml', '.yaml', '.yml',
-        '.py', '.js', '.html', '.css', '.sql', '.log', '.conf',
-        '.ini', '.cfg', '.properties', '.env', '.gitignore',
-        '.dockerfile', '.sh', '.bat', '.ps1'
+        '*'
     }
     
     # Blocked directories (security)
     BLOCKED_DIRECTORIES = {
-        '/etc', '/bin', '/sbin', '/usr/bin', '/usr/sbin',
-        '/System', '/Library', '/Applications',
-        'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)',
-        '/root', '/var/log', '/var/run', '/proc', '/sys'
+
     }
     
     def __init__(self, working_directory: Optional[str] = None, safe_mode: bool = True):
@@ -65,6 +59,10 @@ SUPPORTED OPERATIONS:
 • File Writing:
   - Create/write files: write_file(path, content)
   - Append to files: append_file(path, content)
+  - Modify files: modify_file(path, old_text, new_text)
+  - Insert at line: insert_line(path, line_number, content)
+  - Replace lines: replace_lines(path, start_line, end_line, content)
+  - Delete lines: delete_lines(path, start_line, end_line)
   - Create empty files: create_file(path)
   
 • Directory Operations:
@@ -94,6 +92,10 @@ SECURITY FEATURES:
 USAGE EXAMPLES:
 - "read_file('/path/to/file.txt')" → Read file content
 - "write_file('report.txt', 'Hello World')" → Create/write file
+- "modify_file('config.py', 'old_value = 1', 'old_value = 2')" → Replace specific text
+- "insert_line('script.py', 10, 'print(\"debug\")')" → Insert line at position 10
+- "replace_lines('data.txt', 5, 7, 'new content')" → Replace lines 5-7
+- "delete_lines('temp.log', 1, 3)" → Delete lines 1-3
 - "list_directory('/home/user/documents')" → List directory contents
 - "find_files('*.py', '/project')" → Find Python files
 - "copy_file('source.txt', 'backup.txt')" → Copy file
@@ -155,6 +157,10 @@ COMMON USE CASES:
             'read_file': ['read_file', 'read', 'cat', 'show'],
             'write_file': ['write_file', 'write', 'create'],
             'append_file': ['append_file', 'append'],
+            'modify_file': ['modify_file', 'modify', 'replace_text', 'str_replace'],
+            'insert_line': ['insert_line', 'insert'],
+            'replace_lines': ['replace_lines', 'replace_line_range'],
+            'delete_lines': ['delete_lines', 'remove_lines'],
             'list_directory': ['list_directory', 'list', 'ls', 'dir'],
             'file_info': ['file_info', 'info', 'stat'],
             'file_exists': ['file_exists', 'exists'],
@@ -213,6 +219,31 @@ COMMON USE CASES:
                 return await self._append_file(
                     params[0] if len(params) > 0 else '',
                     params[1] if len(params) > 1 else ''
+                )
+            elif op_name == 'modify_file':
+                return await self._modify_file(
+                    params[0] if len(params) > 0 else '',
+                    params[1] if len(params) > 1 else '',
+                    params[2] if len(params) > 2 else ''
+                )
+            elif op_name == 'insert_line':
+                return await self._insert_line(
+                    params[0] if len(params) > 0 else '',
+                    int(params[1]) if len(params) > 1 and params[1].isdigit() else 1,
+                    params[2] if len(params) > 2 else ''
+                )
+            elif op_name == 'replace_lines':
+                return await self._replace_lines(
+                    params[0] if len(params) > 0 else '',
+                    int(params[1]) if len(params) > 1 and params[1].isdigit() else 1,
+                    int(params[2]) if len(params) > 2 and params[2].isdigit() else 1,
+                    params[3] if len(params) > 3 else ''
+                )
+            elif op_name == 'delete_lines':
+                return await self._delete_lines(
+                    params[0] if len(params) > 0 else '',
+                    int(params[1]) if len(params) > 1 and params[1].isdigit() else 1,
+                    int(params[2]) if len(params) > 2 and params[2].isdigit() else 1
                 )
             elif op_name == 'list_directory':
                 return await self._list_directory(params[0] if params else '.')
@@ -293,6 +324,9 @@ COMMON USE CASES:
     def _is_safe_extension(self, path: str) -> bool:
         """Check if file extension is safe for text operations."""
         ext = Path(path).suffix.lower()
+        # If SAFE_TEXT_EXTENSIONS contains '*', allow all extensions
+        if '*' in self.SAFE_TEXT_EXTENSIONS:
+            return True
         return ext in self.SAFE_TEXT_EXTENSIONS or ext == ''
     
     async def _read_file(self, path: str) -> ToolResult:
@@ -427,6 +461,271 @@ COMMON USE CASES:
         
         except Exception as e:
             return ToolResult(success=False, data=None, error=f"Append failed: {str(e)}")
+    
+    async def _modify_file(self, path: str, old_text: str, new_text: str) -> ToolResult:
+        """Modify file by replacing specific text."""
+        if not path:
+            return ToolResult(success=False, data=None, error="File path required")
+        if not old_text:
+            return ToolResult(success=False, data=None, error="Old text to replace required")
+        
+        # Handle relative paths by resolving them relative to working directory
+        if not os.path.isabs(path):
+            path = os.path.join(self.working_directory, path)
+        
+        if not self._is_safe_path(path):
+            return ToolResult(success=False, data=None, error="Access denied: unsafe path")
+        
+        try:
+            if not os.path.exists(path):
+                return ToolResult(success=False, data=None, error="File not found")
+            
+            if not os.path.isfile(path):
+                return ToolResult(success=False, data=None, error="Path is not a file")
+            
+            # Read current content
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            
+            # Check if old_text exists
+            if old_text not in content:
+                return ToolResult(success=False, data=None, error=f"Text to replace not found: '{old_text}'")
+            
+            # Count occurrences
+            occurrences = content.count(old_text)
+            if occurrences > 1:
+                return ToolResult(
+                    success=False, 
+                    data=None, 
+                    error=f"Text appears {occurrences} times. Use more specific text to avoid ambiguity."
+                )
+            
+            # Create backup
+            backup_path = f"{path}.backup_{int(datetime.now().timestamp())}"
+            shutil.copy2(path, backup_path)
+            
+            # Replace text
+            new_content = content.replace(old_text, new_text)
+            
+            # Write modified content
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            
+            return ToolResult(
+                success=True,
+                data={
+                    "path": path,
+                    "old_text": old_text,
+                    "new_text": new_text,
+                    "backup_path": backup_path,
+                    "size": os.path.getsize(path),
+                    "lines": len(new_content.splitlines())
+                },
+                metadata={"operation": "modify_file"}
+            )
+        
+        except Exception as e:
+            return ToolResult(success=False, data=None, error=f"Modify failed: {str(e)}")
+    
+    async def _insert_line(self, path: str, line_number: int, content: str) -> ToolResult:
+        """Insert content at specific line number."""
+        if not path:
+            return ToolResult(success=False, data=None, error="File path required")
+        if line_number < 1:
+            return ToolResult(success=False, data=None, error="Line number must be >= 1")
+        
+        # Handle relative paths by resolving them relative to working directory
+        if not os.path.isabs(path):
+            path = os.path.join(self.working_directory, path)
+        
+        if not self._is_safe_path(path):
+            return ToolResult(success=False, data=None, error="Access denied: unsafe path")
+        
+        try:
+            if not os.path.exists(path):
+                return ToolResult(success=False, data=None, error="File not found")
+            
+            if not os.path.isfile(path):
+                return ToolResult(success=False, data=None, error="Path is not a file")
+            
+            # Read current content
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+            
+            # Create backup
+            backup_path = f"{path}.backup_{int(datetime.now().timestamp())}"
+            shutil.copy2(path, backup_path)
+            
+            # Insert line (line_number is 1-based)
+            insert_index = line_number - 1
+            if insert_index > len(lines):
+                insert_index = len(lines)
+            
+            # Ensure content ends with newline if it doesn't already
+            if content and not content.endswith('\n'):
+                content += '\n'
+            
+            lines.insert(insert_index, content)
+            
+            # Write modified content
+            with open(path, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+            
+            return ToolResult(
+                success=True,
+                data={
+                    "path": path,
+                    "line_number": line_number,
+                    "inserted_content": content.rstrip('\n'),
+                    "backup_path": backup_path,
+                    "size": os.path.getsize(path),
+                    "total_lines": len(lines)
+                },
+                metadata={"operation": "insert_line"}
+            )
+        
+        except Exception as e:
+            return ToolResult(success=False, data=None, error=f"Insert failed: {str(e)}")
+    
+    async def _replace_lines(self, path: str, start_line: int, end_line: int, content: str) -> ToolResult:
+        """Replace lines in a specific range."""
+        if not path:
+            return ToolResult(success=False, data=None, error="File path required")
+        if start_line < 1 or end_line < 1:
+            return ToolResult(success=False, data=None, error="Line numbers must be >= 1")
+        if start_line > end_line:
+            return ToolResult(success=False, data=None, error="Start line must be <= end line")
+        
+        # Handle relative paths by resolving them relative to working directory
+        if not os.path.isabs(path):
+            path = os.path.join(self.working_directory, path)
+        
+        if not self._is_safe_path(path):
+            return ToolResult(success=False, data=None, error="Access denied: unsafe path")
+        
+        try:
+            if not os.path.exists(path):
+                return ToolResult(success=False, data=None, error="File not found")
+            
+            if not os.path.isfile(path):
+                return ToolResult(success=False, data=None, error="Path is not a file")
+            
+            # Read current content
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+            
+            # Validate line numbers
+            if start_line > len(lines):
+                return ToolResult(success=False, data=None, error=f"Start line {start_line} exceeds file length ({len(lines)} lines)")
+            if end_line > len(lines):
+                end_line = len(lines)
+            
+            # Create backup
+            backup_path = f"{path}.backup_{int(datetime.now().timestamp())}"
+            shutil.copy2(path, backup_path)
+            
+            # Prepare replacement content
+            if content and not content.endswith('\n'):
+                content += '\n'
+            
+            # Replace lines (convert to 0-based indexing)
+            start_idx = start_line - 1
+            end_idx = end_line
+            
+            # Store replaced lines for reporting
+            replaced_lines = lines[start_idx:end_idx]
+            
+            # Replace the range
+            lines[start_idx:end_idx] = [content] if content else []
+            
+            # Write modified content
+            with open(path, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+            
+            return ToolResult(
+                success=True,
+                data={
+                    "path": path,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "replaced_lines": len(replaced_lines),
+                    "new_content": content.rstrip('\n') if content else "",
+                    "backup_path": backup_path,
+                    "size": os.path.getsize(path),
+                    "total_lines": len(lines)
+                },
+                metadata={"operation": "replace_lines"}
+            )
+        
+        except Exception as e:
+            return ToolResult(success=False, data=None, error=f"Replace lines failed: {str(e)}")
+    
+    async def _delete_lines(self, path: str, start_line: int, end_line: int) -> ToolResult:
+        """Delete lines in a specific range."""
+        if not path:
+            return ToolResult(success=False, data=None, error="File path required")
+        if start_line < 1 or end_line < 1:
+            return ToolResult(success=False, data=None, error="Line numbers must be >= 1")
+        if start_line > end_line:
+            return ToolResult(success=False, data=None, error="Start line must be <= end line")
+        
+        # Handle relative paths by resolving them relative to working directory
+        if not os.path.isabs(path):
+            path = os.path.join(self.working_directory, path)
+        
+        if not self._is_safe_path(path):
+            return ToolResult(success=False, data=None, error="Access denied: unsafe path")
+        
+        try:
+            if not os.path.exists(path):
+                return ToolResult(success=False, data=None, error="File not found")
+            
+            if not os.path.isfile(path):
+                return ToolResult(success=False, data=None, error="Path is not a file")
+            
+            # Read current content
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+            
+            # Validate line numbers
+            if start_line > len(lines):
+                return ToolResult(success=False, data=None, error=f"Start line {start_line} exceeds file length ({len(lines)} lines)")
+            if end_line > len(lines):
+                end_line = len(lines)
+            
+            # Create backup
+            backup_path = f"{path}.backup_{int(datetime.now().timestamp())}"
+            shutil.copy2(path, backup_path)
+            
+            # Store deleted lines for reporting
+            start_idx = start_line - 1
+            end_idx = end_line
+            deleted_lines = lines[start_idx:end_idx]
+            
+            # Delete lines
+            del lines[start_idx:end_idx]
+            
+            # Write modified content
+            with open(path, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+            
+            return ToolResult(
+                success=True,
+                data={
+                    "path": path,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "deleted_lines": len(deleted_lines),
+                    "deleted_content": [line.rstrip('\n') for line in deleted_lines],
+                    "backup_path": backup_path,
+                    "size": os.path.getsize(path),
+                    "remaining_lines": len(lines)
+                },
+                metadata={"operation": "delete_lines"}
+            )
+        
+        except Exception as e:
+            return ToolResult(success=False, data=None, error=f"Delete lines failed: {str(e)}")
     
     async def _list_directory(self, path: str) -> ToolResult:
         """List directory contents."""
@@ -809,13 +1108,17 @@ COMMON USE CASES:
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "File operation to perform. Format: operation(parameters). Supports read_file, write_file, list_directory, file_info, copy_file, move_file, delete_file, find_files, search_in_files, and more."
+                    "description": "File operation to perform. Format: operation(parameters). Supports read_file, write_file, modify_file, insert_line, replace_lines, delete_lines, list_directory, file_info, copy_file, move_file, delete_file, find_files, search_in_files, and more."
                 }
             },
             "required": ["query"],
             "examples": [
                 "read_file('config.txt')",
                 "write_file('report.txt', 'Hello World')",
+                "modify_file('config.py', 'old_value = 1', 'old_value = 2')",
+                "insert_line('script.py', 10, 'print(\"debug\")')",
+                "replace_lines('data.txt', 5, 7, 'new content')",
+                "delete_lines('temp.log', 1, 3)",
                 "list_directory('/home/user/documents')",
                 "file_info('/path/to/file.txt')",
                 "copy_file('source.txt', 'backup.txt')",

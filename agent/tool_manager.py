@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 from tools import DatabaseTool, WikipediaTool, WebSearchTool, CalculatorTool, CppExecutorTool, CommandLineTool, FileManagerTool
+from tools.file_explorer_tool import FileExplorerTool
 from tools.base_tool import BaseTool, ToolResult
 
 
@@ -21,7 +22,8 @@ class ToolManager:
             CalculatorTool(),
             CppExecutorTool(),
             CommandLineTool(),
-            FileManagerTool()
+            FileManagerTool(),
+            FileExplorerTool(working_directory='*', safe_mode=True)  # Allow access to all paths with safety checks
         ]
         
         for tool in tools:
