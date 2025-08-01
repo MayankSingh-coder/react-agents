@@ -8,6 +8,14 @@ from .cpp_executor_tool import CppExecutorTool
 from .command_line_tool import CommandLineTool
 from .file_manager_tool import FileManagerTool
 
+# Automation tools
+from .automation.screenshot_tool import ScreenshotTool
+from .automation.app_launcher_tool import AppLauncherTool
+from .automation.text_input_tool import TextInputTool
+from .automation.click_tool import ClickTool
+from .automation.browser_automation_tool import BrowserAutomationTool
+from .automation.visual_analysis_tool import VisualAnalysisTool
+
 __all__ = [
     "DatabaseTool",
     "WikipediaTool", 
@@ -15,5 +23,12 @@ __all__ = [
     "CalculatorTool",
     "CppExecutorTool",
     "CommandLineTool",
-    "FileManagerTool"
+    "FileManagerTool",
+    # Automation tools
+    "ScreenshotTool",
+    "AppLauncherTool",
+    "TextInputTool",
+    "ClickTool",
+    "BrowserAutomationTool",
+    "VisualAnalysisTool"
 ]

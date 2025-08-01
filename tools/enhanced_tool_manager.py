@@ -8,6 +8,16 @@ from tools.file_explorer_tool import FileExplorerTool
 from mysql_config import MySQLConfig
 import logging
 
+# Import automation tools
+from tools.automation.screenshot_tool import ScreenshotTool
+from tools.automation.app_launcher_tool import AppLauncherTool
+from tools.automation.text_input_tool import TextInputTool
+from tools.automation.click_tool import ClickTool
+from tools.automation.unified_browser_tool import UnifiedBrowserTool
+from tools.automation.visual_analysis_tool import VisualAnalysisTool
+from tools.automation.element_discovery_tool import ElementDiscoveryTool
+from tools.automation.element_interaction_tool import ElementInteractionTool
+
 try:
     from tools.mysql_database_tool import MySQLDatabaseTool
     MYSQL_TOOL_AVAILABLE = True
@@ -22,11 +32,12 @@ class EnhancedToolManager:
     """Enhanced tool manager with support for both in-memory and MySQL databases."""
     
     def __init__(self, use_mysql: bool = False, mysql_config: Optional[Dict[str, Any]] = None, 
-                 chatbot_instance=None):
+                 chatbot_instance=None, include_automation: bool = True):
         self.tools: Dict[str, BaseTool] = {}
         self.use_mysql = use_mysql
         self.mysql_config = mysql_config or MySQLConfig.get_config()
         self.chatbot_instance = chatbot_instance
+        self.include_automation = include_automation
         self._initialize_tools()
     
     def _initialize_tools(self):
@@ -77,6 +88,21 @@ class EnhancedToolManager:
             FileExplorerTool(working_directory='*', safe_mode=True)  # Allow access to all paths with safety checks
         ])
         
+        # Add automation tools if requested
+        if self.include_automation:
+            automation_tools = [
+                ScreenshotTool(),
+                AppLauncherTool(),
+                TextInputTool(),
+                ClickTool(),
+                UnifiedBrowserTool(),  # Unified browser tool with navigation and basic automation
+                ElementDiscoveryTool(),  # Advanced element discovery for web automation
+                ElementInteractionTool(),  # Precise element interaction for web automation
+                VisualAnalysisTool()
+            ]
+            tools.extend(automation_tools)
+            logger.info(f"✅ Added {len(automation_tools)} automation tools")
+        
         # Register all tools
         for tool in tools:
             self.tools[tool.name] = tool
@@ -117,8 +143,13 @@ class EnhancedToolManager:
                 error=f"Tool execution failed: {str(e)}"
             )
     
-    def add_tool(self, tool: BaseTool):
+    def add_tool(self, name: str, tool: BaseTool):
         """Add a new tool to the manager."""
+        self.tools[name] = tool
+        logger.info(f"Added tool: {name}")
+    
+    def add_tool_object(self, tool: BaseTool):
+        """Add a new tool to the manager using the tool's name."""
         self.tools[tool.name] = tool
         logger.info(f"Added tool: {tool.name}")
     
@@ -192,14 +223,14 @@ class EnhancedToolManager:
                         password=self.mysql_config["password"],
                         port=self.mysql_config["port"]
                     )
-                    self.add_tool(mysql_tool)
+                    self.add_tool_object(mysql_tool)
                     logger.info("✅ Switched to MySQL database")
                 else:
                     logger.error("❌ Invalid MySQL config, keeping current database")
             except Exception as e:
                 logger.error(f"❌ Failed to switch to MySQL: {e}")
         else:
-            self.add_tool(DatabaseTool())
+            self.add_tool_object(DatabaseTool())
             logger.info("✅ Switched to in-memory database")
     
     def get_database_status(self) -> Dict[str, Any]:

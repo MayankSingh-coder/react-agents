@@ -5,12 +5,21 @@ from tools import DatabaseTool, WikipediaTool, WebSearchTool, CalculatorTool, Cp
 from tools.file_explorer_tool import FileExplorerTool
 from tools.base_tool import BaseTool, ToolResult
 
+# Import automation tools
+from tools.automation.screenshot_tool import ScreenshotTool
+from tools.automation.app_launcher_tool import AppLauncherTool
+from tools.automation.text_input_tool import TextInputTool
+from tools.automation.click_tool import ClickTool
+from tools.automation.unified_browser_tool import UnifiedBrowserTool
+from tools.automation.visual_analysis_tool import VisualAnalysisTool
+
 
 class ToolManager:
     """Manages all available tools for the React Agent."""
     
-    def __init__(self):
+    def __init__(self, include_automation: bool = True):
         self.tools: Dict[str, BaseTool] = {}
+        self.include_automation = include_automation
         self._initialize_tools()
     
     def _initialize_tools(self):
@@ -25,6 +34,18 @@ class ToolManager:
             FileManagerTool(),
             FileExplorerTool(working_directory='*', safe_mode=True)  # Allow access to all paths with safety checks
         ]
+        
+        # Add automation tools if requested
+        if self.include_automation:
+            automation_tools = [
+                ScreenshotTool(),
+                AppLauncherTool(),
+                TextInputTool(),
+                ClickTool(),
+                UnifiedBrowserTool(),  # Replaces BrowserAutomationTool
+                VisualAnalysisTool()
+            ]
+            tools.extend(automation_tools)
         
         for tool in tools:
             self.tools[tool.name] = tool
@@ -64,8 +85,12 @@ class ToolManager:
                 error=f"Tool execution failed: {str(e)}"
             )
     
-    def add_tool(self, tool: BaseTool):
+    def add_tool(self, name: str, tool: BaseTool):
         """Add a new tool to the manager."""
+        self.tools[name] = tool
+    
+    def add_tool_object(self, tool: BaseTool):
+        """Add a new tool to the manager using the tool's name."""
         self.tools[tool.name] = tool
     
     def remove_tool(self, name: str) -> bool:

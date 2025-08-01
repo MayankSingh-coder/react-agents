@@ -40,7 +40,8 @@ class ReactAgent:
     def __init__(self, verbose: bool = True, mode: str = "hybrid", use_mysql: bool = True, 
                  enable_reflection: bool = True, reflection_quality_threshold: float = 0.7,
                  reflection_strategy: ReflectionStrategy = ReflectionStrategy.BALANCED,
-                 enable_dynamic_strategy: bool = False, user_preferences: dict = None):
+                 enable_dynamic_strategy: bool = False, user_preferences: dict = None,
+                 include_automation: bool = True):
         self.verbose = verbose
         self.mode = mode  # "react", "plan_execute", or "hybrid"
         self.enable_reflection = enable_reflection
@@ -57,8 +58,12 @@ class ReactAgent:
             "password": "root"
         }
         
-        # Use EnhancedToolManager with MySQL support
-        self.tool_manager = EnhancedToolManager(use_mysql=use_mysql, mysql_config=mysql_config)
+        # Use EnhancedToolManager with MySQL support and automation tools
+        self.tool_manager = EnhancedToolManager(
+            use_mysql=use_mysql, 
+            mysql_config=mysql_config,
+            include_automation=include_automation
+        )
         
         if self.verbose:
             print(f"🔧 Initialized ReactAgent with {'MySQL' if use_mysql else 'in-memory'} database")

@@ -12,3 +12,11 @@ uvicorn>=0.24.0
 streamlit>=1.28.1
 nest-asyncio==1.5.8
 mysql-connector-python==8.2.0
+
+# Automation tools dependencies
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+pillow>=10.0.0
+pyautogui>=0.9.54
+pynput>=1.8.0
+google-generativeai>=0.3.0
