@@ -2,10 +2,14 @@
 
 import base64
 import os
+import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 import google.generativeai as genai
 from PIL import Image
+import pyautogui
 from ..base_tool import BaseTool, ToolResult
+from .window_manager import window_manager
 
 
 class VisualAnalysisTool(BaseTool):
@@ -14,13 +18,20 @@ class VisualAnalysisTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="visual_analysis",
-            description=self._get_detailed_description()
+            description=self._get_simple_description()
         )
         
         # Configure Gemini API
         from config import Config
         genai.configure(api_key=Config.GOOGLE_API_KEY)
-        self.model = genai.GenerativeModel('gemini-2.0-flash-lite')
+        self.model = genai.GenerativeModel('gemini-2.0-flash')
+        
+        # Create screenshots directory if it doesn't exist
+        self.screenshots_dir = "/Users/mayank/Desktop/concepts/react-agents/screenshots"
+        os.makedirs(self.screenshots_dir, exist_ok=True)
+        
+        # Disable pyautogui failsafe for automation
+        pyautogui.FAILSAFE = False
         
         # Analysis templates for different use cases
         self.analysis_prompts = {
@@ -91,19 +102,26 @@ class VisualAnalysisTool(BaseTool):
     
     def _get_detailed_description(self) -> str:
         """Get detailed description with examples for visual analysis operations."""
-        return """Analyze screenshots and images using Gemini Vision API to identify page state, UI elements, buttons, forms, and provide actionable insights.
+        return """🔍 INTEGRATED SCREENSHOT + VISUAL ANALYSIS TOOL
+Automatically takes fresh screenshots and analyzes them using Gemini Vision API to identify page state, UI elements, buttons, forms, and provide actionable insights.
 
 🎯 WHEN TO USE THIS TOOL:
-- Understanding current page state and available actions
+- Understanding current page state and available actions (takes fresh screenshot automatically)
 - Identifying clickable elements and their locations
 - Analyzing forms and input fields
 - Extracting text content from images (OCR)
 - Comparing screenshots to detect changes
 - Finding specific elements by description
+- Starting any automation workflow (e.g., "analyze Swiggy page to order food")
+
+✅ KEY BENEFITS:
+- ALWAYS uses fresh screenshots (no stale data)
+- Automatically focuses correct browser/app before screenshot
+- One-step process: screenshot + analysis combined
+- Perfect for automation workflows
 
 ❌ DON'T USE FOR:
 - Actually clicking or interacting with elements (use ClickTool/ElementInteractionTool)
-- Taking screenshots (use ScreenshotTool first)
 - Modifying page content
 - Real-time dynamic content analysis
 
@@ -163,10 +181,14 @@ ANALYSIS TYPES:
 - form_filling: Form fields, validation, required fields
 
 COMMON PARAMETERS:
-- image_path: Path to specific image (uses latest screenshot if not provided)
+- image_path: Path to specific image (takes fresh screenshot if not provided)
 - custom_prompt: Override default analysis prompt
 - return_coordinates: Include approximate element coordinates
 - confidence_threshold: Minimum confidence for element detection (0.0-1.0)
+- take_fresh_screenshot: Force new screenshot even if image_path provided (default: true)
+- app_name: Focus specific application before screenshot (e.g., 'Safari', 'Chrome')
+- browser_type: Focus specific browser before screenshot (e.g., 'safari', 'chrome')
+- region: Screenshot specific region (x, y, width, height)
 
 OUTPUT FORMAT:
 Returns structured JSON with:
@@ -187,14 +209,54 @@ LIMITATIONS:
 - OCR accuracy depends on image quality and text clarity
 
 WORKFLOW INTEGRATION:
-Essential for complex automation workflows:
-1. Take screenshot after navigation
-2. Use visual_analysis to understand page state
-3. Extract element locations and required actions
-4. Use click/text_input tools to interact with identified elements
-5. Repeat cycle for multi-step processes
+Perfect starting point for automation workflows:
+1. Use visual_analysis to automatically screenshot and understand current page state
+2. Extract element locations and required actions from analysis
+3. Use click/text_input tools to interact with identified elements
+4. Repeat cycle for multi-step processes
 
-⚠️  IMPORTANT: Always take a screenshot first before using this tool. Use latest screenshot by default."""
+✅ AUTOMATIC FRESH SCREENSHOTS: This tool automatically takes fresh screenshots, ensuring you always analyze current page state."""
+
+    def _get_simple_description(self) -> str:
+        """Get simplified description with only analyze_page action."""
+        return """🔍 INTEGRATED SCREENSHOT + VISUAL ANALYSIS TOOL
+Automatically takes fresh screenshots and analyzes them using Gemini Vision API to identify page state, UI elements, buttons, forms, and provide actionable insights.
+
+🎯 WHEN TO USE THIS TOOL:
+- Understanding current page state and available actions (takes fresh screenshot automatically)
+- Identifying clickable elements and their locations
+- Analyzing forms and input fields
+- Starting any automation workflow (e.g., "analyze Swiggy page to order food")
+
+✅ KEY BENEFITS:
+- ALWAYS uses fresh screenshots (no stale data)
+- Automatically focuses correct browser/app before screenshot
+- One-step process: screenshot + analysis combined
+- Perfect for automation workflows
+
+❌ DON'T USE FOR:
+- Actually clicking or interacting with elements (use ClickTool/ElementInteractionTool)
+- Modifying page content
+- Real-time dynamic content analysis
+
+OPERATIONS & SYNTAX:
+
+• analyze_page - General page analysis and UI element identification
+  Usage: {"action": "analyze_page", "analysis_type": "general"}
+  ⚠️  IMPORTANT: Analysis types: general
+
+ANALYSIS TYPES:
+- general: Basic UI element identification and page structure
+
+OUTPUT FORMAT:
+Returns structured JSON with:
+- page_type: Current page classification
+- ui_elements: List of identified elements with locations
+- clickable_elements: Buttons/links with action suggestions
+- input_fields: Form fields with types and placeholders
+- suggested_actions: Recommended next steps
+
+✅ AUTOMATIC FRESH SCREENSHOTS: This tool automatically takes fresh screenshots, ensuring you always analyze current page state."""
 
     async def execute(self, query: str, **kwargs) -> ToolResult:
         """
@@ -216,30 +278,44 @@ Essential for complex automation workflows:
                 - confidence_threshold: minimum confidence for detection
         """
         try:
-            # Parse action from kwargs or query
+            # Handle case where parameters are passed as JSON string in query (for LLM agents)
+            if not kwargs and query.strip().startswith('{') and query.strip().endswith('}'):
+                try:
+                    import json
+                    parsed_params = json.loads(query)
+                    if isinstance(parsed_params, dict):
+                        kwargs = parsed_params
+                        query = kwargs.pop('query', '')  # Extract query if present
+                        print(f"🔧 VisualAnalysisTool: Parsed JSON from query parameter")
+                        print(f"  new query: '{query}'")
+                        print(f"  new kwargs: {kwargs}")
+                except (json.JSONDecodeError, ValueError) as e:
+                    print(f"Failed to parse query as JSON: {e}")
+            
+          # Parse action from kwargs or query
             action = kwargs.get('action')
             if not action:
-                # Try to parse from query if it's JSON-like
-                import json
-                try:
-                    if query.strip().startswith('{'):
-                        parsed = json.loads(query)
-                        action = parsed.get('action')
-                        kwargs.update(parsed)
-                except:
-                    # Fallback to legacy parsing for backward compatibility
-                    action = 'analyze_page'
+                  # Fallback to legacy parsing for backward compatibility
+                action = 'analyze_page'
             
-            # Get image path
+            # Get image path - prioritize fresh screenshots
             image_path = kwargs.get('image_path', None)
-            if not image_path:
-                image_path = self._get_latest_screenshot()
+            take_fresh_screenshot = kwargs.get('take_fresh_screenshot', True)  # Default to fresh screenshot
+            
+            # Take fresh screenshot unless explicitly disabled and image_path provided
+            if take_fresh_screenshot or not image_path:
+                fresh_screenshot_path = await self._take_fresh_screenshot(query=query, **kwargs)
+                if fresh_screenshot_path:
+                    image_path = fresh_screenshot_path
+                elif not image_path:
+                    # Fallback to latest screenshot if fresh screenshot fails
+                    image_path = self._get_latest_screenshot()
             
             if not image_path or not os.path.exists(image_path):
                 return ToolResult(
                     success=False,
                     data=None,
-                    error="No image file found. Please take a screenshot first."
+                    error="No image file found. Failed to take screenshot and no existing screenshots available."
                 )
             
             # Route to appropriate action handler
@@ -417,20 +493,88 @@ Essential for complex automation workflows:
     
     def _get_latest_screenshot(self) -> Optional[str]:
         """Get the path to the most recent screenshot."""
-        screenshots_dir = "/Users/mayank/Desktop/concepts/react-agents/screenshots"
-        
-        if not os.path.exists(screenshots_dir):
+        if not os.path.exists(self.screenshots_dir):
             return None
         
         try:
-            screenshots = [f for f in os.listdir(screenshots_dir) if f.endswith('.png')]
+            screenshots = [f for f in os.listdir(self.screenshots_dir) if f.endswith('.png')]
             if not screenshots:
                 return None
             
             # Sort by modification time
-            screenshots.sort(key=lambda x: os.path.getmtime(os.path.join(screenshots_dir, x)), reverse=True)
-            return os.path.join(screenshots_dir, screenshots[0])
+            screenshots.sort(key=lambda x: os.path.getmtime(os.path.join(self.screenshots_dir, x)), reverse=True)
+            return os.path.join(self.screenshots_dir, screenshots[0])
         except Exception:
+            return None
+    
+    async def _take_fresh_screenshot(self, **kwargs) -> Optional[str]:
+        """Take a fresh screenshot with optional app/browser focusing."""
+        try:
+            # Extract screenshot parameters
+            app_name = kwargs.get('app_name', None)
+            browser_type = kwargs.get('browser_type', None)
+            region = kwargs.get('region', None)
+            
+            # Detect application from query if not explicitly provided
+            if not app_name and not browser_type:
+                query = kwargs.get('query', '')
+                query_lower = query.lower()
+                
+                # Check for browser mentions
+                if 'safari' in query_lower:
+                    browser_type = 'safari'
+                elif 'chrome' in query_lower and 'chromium' not in query_lower:
+                    browser_type = 'chrome'
+                elif 'chromium' in query_lower:
+                    browser_type = 'chromium'
+                elif 'firefox' in query_lower:
+                    browser_type = 'firefox'
+                elif 'edge' in query_lower:
+                    browser_type = 'edge'
+                # Check for other common applications
+                elif 'finder' in query_lower:
+                    app_name = 'Finder'
+                elif 'terminal' in query_lower:
+                    app_name = 'Terminal'
+                elif any(word in query_lower for word in ['swiggy', 'zomato', 'amazon', 'flipkart', 'shop', 'order']):
+                    # For e-commerce sites, default to Safari if no browser specified
+                    browser_type = 'safari'
+            
+            # Focus the correct application before taking screenshot
+            focus_success = True
+            if browser_type:
+                focus_success = window_manager.ensure_browser_focus(browser_type)
+                if not focus_success:
+                    print(f"Warning: Failed to focus {browser_type} browser before screenshot")
+            elif app_name:
+                focus_success = window_manager.ensure_app_focus(app_name)
+                if not focus_success:
+                    print(f"Warning: Failed to focus {app_name} before screenshot")
+            
+            # Generate filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            if browser_type:
+                filename = f"visual_analysis_{browser_type}_{timestamp}.png"
+            elif app_name:
+                filename = f"visual_analysis_{app_name.lower().replace(' ', '_')}_{timestamp}.png"
+            else:
+                filename = f"visual_analysis_{timestamp}.png"
+            
+            filepath = os.path.join(self.screenshots_dir, filename)
+            
+            # Take screenshot
+            if region:
+                screenshot = pyautogui.screenshot(region=region)
+            else:
+                screenshot = pyautogui.screenshot()
+            
+            # Save screenshot
+            screenshot.save(filepath)
+            
+            return filepath
+            
+        except Exception as e:
+            print(f"Error taking fresh screenshot: {e}")
             return None
     
     async def analyze_for_coordinates(self, image_path: str, element_description: str) -> ToolResult:
@@ -833,7 +977,20 @@ Essential for complex automation workflows:
                 },
                 "image_path": {
                     "type": "string",
-                    "description": "Optional: path to specific image file (uses latest screenshot if not provided)"
+                    "description": "Optional: path to specific image file (takes fresh screenshot if not provided)"
+                },
+                "take_fresh_screenshot": {
+                    "type": "boolean",
+                    "description": "Optional: force new screenshot even if image_path provided (default: true)"
+                },
+                "app_name": {
+                    "type": "string",
+                    "description": "Optional: focus specific application before screenshot (e.g., 'Safari', 'Chrome')"
+                },
+                "browser_type": {
+                    "type": "string",
+                    "enum": ["safari", "chrome", "chromium", "firefox", "edge"],
+                    "description": "Optional: focus specific browser before screenshot"
                 },
                 "analysis_type": {
                     "type": "string",

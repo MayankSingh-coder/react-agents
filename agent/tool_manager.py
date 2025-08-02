@@ -41,7 +41,7 @@ class ToolManager:
                 ScreenshotTool(),
                 AppLauncherTool(),
                 TextInputTool(),
-                ClickTool(),
+                # ClickTool(),
                 UnifiedBrowserTool(),  # Replaces BrowserAutomationTool
                 VisualAnalysisTool()
             ]
@@ -75,6 +75,20 @@ class ToolManager:
                 data=None,
                 error=f"Tool '{tool_name}' not found. Available tools: {', '.join(self.get_tool_names())}"
             )
+        
+        # Handle case where parameters are passed as JSON string in query (for LLM agents)
+        if not kwargs and query.strip().startswith('{') and query.strip().endswith('}'):
+            try:
+                import json
+                parsed_params = json.loads(query)
+                if isinstance(parsed_params, dict):
+                    kwargs = parsed_params
+                    query = kwargs.pop('query', '')  # Extract query if present
+                    print(f"🔧 ToolManager: Parsed JSON from query for {tool_name}")
+                    print(f"  new query: '{query}'")
+                    print(f"  new kwargs: {kwargs}")
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f"Failed to parse query as JSON for {tool_name}: {e}")
         
         try:
             return await tool.execute(query, **kwargs)

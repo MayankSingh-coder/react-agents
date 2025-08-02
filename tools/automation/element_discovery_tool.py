@@ -1,5 +1,6 @@
 """Element discovery tool for finding and analyzing web page elements."""
 
+import logging
 import time
 from typing import Any, Dict, List, Optional
 from selenium import webdriver
@@ -18,7 +19,7 @@ class ElementDiscoveryTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="element_discovery",
-            description=self._get_detailed_description()
+            description=self._get_simple_description()
         )
         
         self.driver = None
@@ -81,6 +82,56 @@ Use the returned element selectors with:
 
 ⚠️  IMPORTANT: Requires active browser session. Use unified_browser to open browser first."""
 
+    def _get_simple_description(self) -> str:
+        """Get simplified description with only find_by_text action."""
+        return """Discover and analyze interactive elements on web pages for automation.
+
+🎯 WHEN TO USE THIS TOOL:
+- Finding elements by their visible text content
+- Locating buttons, links, or labels with specific text
+- Searching for interactive elements containing keywords
+
+✅ KEY BENEFITS:
+- Text-based element discovery
+- Returns detailed element information including selectors
+- Works with visible text content
+- Perfect for finding elements by their display text
+
+❌ DON'T USE FOR:
+- Actually clicking or interacting with elements (use unified_browser or click_tool)
+
+OPERATIONS & SYNTAX:
+
+• find_by_text <text_contains> - Find elements containing specific text
+  Usage: {"action": "find_by_text", "text_contains": "Sign Up"}
+  Usage: {"action": "find_by_text", "text_contains": "login"}
+  Usage: {"action": "find_by_text", "text_contains": "Submit"}
+
+• find_by_type <element_type> - Find elements by specific type
+  Usage: {"action": "find_by_type", "element_type": "button"}
+  Usage: {"action": "find_by_type", "element_type": "input"}
+  Usage: {"action": "find_by_type", "element_type": "link"}
+  Usage: {"action": "find_by_type", "element_type": "form"}
+  ⚠️  IMPORTANT: Supports button, input, link, form, field, text, checkbox, radio, select
+RETURN FORMAT:
+Returns element information including:
+- CSS selectors (id, class, xpath)
+- Element type and attributes
+- Text content and visibility
+- Suggested interaction methods
+
+COMMON PARAMETERS:
+- visible_only: Only return visible elements (default: true)
+- limit: Maximum number of elements to return (default: 20)
+
+INTEGRATION:
+Use the returned element selectors with:
+- unified_browser: Click or interact with discovered elements
+- click_tool: Click on discovered elements using coordinates
+- text_input_tool: Type in discovered input fields
+
+⚠️  IMPORTANT: Requires active browser session. Use unified_browser to open browser first."""
+
     async def execute(self, query: str, **kwargs) -> ToolResult:
         """
         Execute element discovery operations.
@@ -112,9 +163,32 @@ Use the returned element selectors with:
             {"action": "analyze_element", "element_selector": "#username"}
             {"action": "find_by_attributes", "attribute_filter": {"placeholder": "email"}}
         """
+        # DEBUG: Log what we actually received
+        logger = logging.getLogger(__name__)
+        logger.info(f"ElementDiscoveryTool.execute() called with:")
+        logger.info(f"  query: '{query}'")
+        logger.info(f"  kwargs: {kwargs}")
+        logger.info(f"  kwargs type: {type(kwargs)}")
+        logger.info(f"  kwargs keys: {list(kwargs.keys()) if kwargs else 'No keys'}")
+        
+        # Handle case where parameters are passed as JSON string in query
+        if not kwargs and query.strip().startswith('{') and query.strip().endswith('}'):
+            try:
+                import json
+                parsed_params = json.loads(query)
+                if isinstance(parsed_params, dict):
+                    kwargs = parsed_params
+                    query = kwargs.pop('query', '')  # Extract query if present
+                    logger.info(f"🔧 Parsed JSON from query parameter:")
+                    logger.info(f"  new query: '{query}'")
+                    logger.info(f"  new kwargs: {kwargs}")
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Failed to parse query as JSON: {e}")
+        
         try:
             # CRITICAL: Ensure browser focus before element discovery
-            browser_type = kwargs.get('browser_type', 'chrome')  # Default to chrome for selenium
+            browser_type = kwargs.get('browser_type', 'chrome')# Default to chrome for selenium
+            logging.info(f"Ensuring focus on {browser_type} browser before element discovery.")
             focus_success = window_manager.ensure_browser_focus(browser_type)
             if not focus_success:
                 return ToolResult(
@@ -132,7 +206,7 @@ Use the returned element selectors with:
                 )
             
             action = kwargs.get('action', 'find_all_elements')
-            
+            logging.info(f"Executing element discovery action: {action} with parameters: {kwargs}")
             if action == 'find_all_elements':
                 result = await self._find_all_elements(query, kwargs)
             elif action == 'find_by_type':
@@ -311,12 +385,18 @@ Use the returned element selectors with:
     
     async def _find_elements_by_text(self, query: str, kwargs: Dict[str, Any]) -> ToolResult:
         """Find elements containing specific text."""
+        logger = logging.getLogger(__name__)
+        logger.info(f"Starting _find_elements_by_text with query: '{query}', kwargs: {kwargs}")
+        
         try:
             text_contains = kwargs.get('text_contains', None)
             if not text_contains:
                 text_contains = self._extract_text_from_query(query)
             
+            logger.info(f"Extracted text to search for: '{text_contains}'")
+            
             if not text_contains:
+                logger.warning("No text specified to search for")
                 return ToolResult(
                     success=False,
                     data=None,
@@ -325,6 +405,8 @@ Use the returned element selectors with:
             
             visible_only = kwargs.get('visible_only', True)
             limit = kwargs.get('limit', 20)
+            
+            logger.info(f"Search parameters - visible_only: {visible_only}, limit: {limit}")
             
             # Search strategies
             search_xpaths = [
@@ -338,34 +420,67 @@ Use the returned element selectors with:
                 f'//input[contains(@placeholder, "{text_contains}")]'
             ]
             
+            logger.info(f"Using {len(search_xpaths)} search strategies:")
+            for i, xpath in enumerate(search_xpaths, 1):
+                logger.info(f"  {i}. {xpath}")
+            
             elements = []
             found_element_ids = set()  # Avoid duplicates
             
-            for xpath in search_xpaths:
+            for i, xpath in enumerate(search_xpaths, 1):
+                logger.info(f"Executing search strategy {i}/{len(search_xpaths)}: {xpath}")
                 try:
                     found_elements = self.driver.find_elements(By.XPATH, xpath)
+                    logger.info(f"  Found {len(found_elements)} raw elements with this XPath")
+                    
+                    processed_count = 0
+                    skipped_invisible = 0
+                    skipped_duplicate = 0
+                    
                     for element in found_elements:
                         if visible_only and not element.is_displayed():
+                            skipped_invisible += 1
                             continue
                         
                         # Create unique identifier to avoid duplicates
                         element_id = f"{element.tag_name}_{element.location}_{element.size}"
                         if element_id in found_element_ids:
+                            skipped_duplicate += 1
                             continue
                         found_element_ids.add(element_id)
                         
                         element_info = self._extract_element_info(element)
                         if element_info:
                             elements.append(element_info)
+                            processed_count += 1
+                            logger.debug(f"    Added element: {element_info.get('tag_name', 'unknown')} - {element_info.get('text', '')[:50]}...")
                             
                         if len(elements) >= limit:
+                            logger.info(f"  Reached limit of {limit} elements, stopping search")
                             break
+                    
+                    logger.info(f"  Strategy {i} results: {processed_count} processed, {skipped_invisible} skipped (invisible), {skipped_duplicate} skipped (duplicate)")
                             
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"  Strategy {i} failed with error: {str(e)}")
                     continue
                 
                 if len(elements) >= limit:
+                    logger.info(f"Reached overall limit of {limit} elements, stopping all searches")
                     break
+            
+            logger.info(f"Search completed. Total elements found: {len(elements)}")
+            logger.info(f"Current page URL: {self.driver.current_url}")
+            
+            # Log summary of found elements
+            if elements:
+                logger.info("Summary of found elements:")
+                for i, elem in enumerate(elements[:5], 1):  # Log first 5 elements
+                    logger.info(f"  {i}. {elem.get('tag_name', 'unknown')} - Text: '{elem.get('text', '')[:30]}...' - ID: {elem.get('id', 'N/A')} - Class: {elem.get('class', 'N/A')}")
+                if len(elements) > 5:
+                    logger.info(f"  ... and {len(elements) - 5} more elements")
+            else:
+                logger.warning("No elements found matching the search criteria")
             
             return ToolResult(
                 success=True,
@@ -382,6 +497,7 @@ Use the returned element selectors with:
             )
             
         except Exception as e:
+            logger.error(f"Failed to find elements by text: {str(e)}", exc_info=True)
             return ToolResult(
                 success=False,
                 data=None,

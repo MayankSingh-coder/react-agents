@@ -141,19 +141,25 @@ Essential for form filling workflows:
                 - clear_first: whether to clear existing text first
         """
         try:
+            # Handle case where parameters are passed as JSON string in query (for LLM agents)
+            if not kwargs and query.strip().startswith('{') and query.strip().endswith('}'):
+                try:
+                    import json
+                    parsed_params = json.loads(query)
+                    if isinstance(parsed_params, dict):
+                        kwargs = parsed_params
+                        query = kwargs.pop('query', '')  # Extract query if present
+                        print(f"🔧 TextInputTool: Parsed JSON from query parameter")
+                        print(f"  new query: '{query}'")
+                        print(f"  new kwargs: {kwargs}")
+                except (json.JSONDecodeError, ValueError) as e:
+                    print(f"Failed to parse query as JSON: {e}")
+            
             # Parse action from kwargs or query
             action = kwargs.get('action')
             if not action:
-                # Try to parse from query if it's JSON-like
-                import json
-                try:
-                    if query.strip().startswith('{'):
-                        parsed = json.loads(query)
-                        action = parsed.get('action')
-                        kwargs.update(parsed)
-                except:
-                    # Fallback to legacy parsing for backward compatibility
-                    action = self._determine_action_type(query, kwargs)
+                # Fallback to legacy parsing for backward compatibility
+                action = self._determine_action_type(query, kwargs)
             
             if action == 'type_text':
                 result = await self._type_text(query, kwargs)
@@ -234,6 +240,30 @@ Essential for form filling workflows:
                     browser_type = 'firefox'
                 elif 'edge' in query_lower:
                     browser_type = 'edge'
+                
+                # Check for other common applications
+                elif 'notes' in query_lower:
+                    app_name = 'Notes'
+                elif 'textedit' in query_lower or 'text edit' in query_lower:
+                    app_name = 'TextEdit'
+                elif 'finder' in query_lower:
+                    app_name = 'Finder'
+                elif 'terminal' in query_lower:
+                    app_name = 'Terminal'
+                elif 'calculator' in query_lower:
+                    app_name = 'Calculator'
+                elif 'preview' in query_lower:
+                    app_name = 'Preview'
+                elif 'mail' in query_lower:
+                    app_name = 'Mail'
+                elif 'calendar' in query_lower:
+                    app_name = 'Calendar'
+                elif 'messages' in query_lower:
+                    app_name = 'Messages'
+                elif 'music' in query_lower:
+                    app_name = 'Music'
+                elif 'photos' in query_lower:
+                    app_name = 'Photos'
             
             # Focus the correct application before typing
             if browser_type:
@@ -280,13 +310,37 @@ Essential for form filling workflows:
             # Type the text
             pyautogui.write(text, interval=interval)
             
+            # Re-verify focus after typing to ensure it wasn't lost
+            focus_maintained = True
+            if browser_type or app_name:
+                import time
+                time.sleep(0.2)  # Brief pause to let typing complete
+                
+                # Check if focus was lost and try to regain it
+                current_app = window_manager.get_frontmost_application()
+                expected_app = browser_type if browser_type else app_name
+                
+                if browser_type:
+                    expected_app_name = window_manager.browser_apps.get(browser_type, browser_type)
+                else:
+                    expected_app_name = app_name
+                
+                if current_app != expected_app_name:
+                    # Focus was lost, try to regain it
+                    if browser_type:
+                        focus_maintained = window_manager.ensure_browser_focus(browser_type)
+                    else:
+                        focus_maintained = window_manager.ensure_app_focus(app_name)
+            
             return ToolResult(
                 success=True,
                 data={
                     "text_typed": text,
                     "character_count": len(text),
                     "typing_speed": interval,
-                    "cleared_first": clear_first
+                    "cleared_first": clear_first,
+                    "focus_maintained": focus_maintained,
+                    "focused_app": browser_type or app_name
                 },
                 metadata={
                     "query": query,
@@ -323,6 +377,30 @@ Essential for form filling workflows:
                     browser_type = 'firefox'
                 elif 'edge' in query_lower:
                     browser_type = 'edge'
+                
+                # Check for other common applications
+                elif 'notes' in query_lower:
+                    app_name = 'Notes'
+                elif 'textedit' in query_lower or 'text edit' in query_lower:
+                    app_name = 'TextEdit'
+                elif 'finder' in query_lower:
+                    app_name = 'Finder'
+                elif 'terminal' in query_lower:
+                    app_name = 'Terminal'
+                elif 'calculator' in query_lower:
+                    app_name = 'Calculator'
+                elif 'preview' in query_lower:
+                    app_name = 'Preview'
+                elif 'mail' in query_lower:
+                    app_name = 'Mail'
+                elif 'calendar' in query_lower:
+                    app_name = 'Calendar'
+                elif 'messages' in query_lower:
+                    app_name = 'Messages'
+                elif 'music' in query_lower:
+                    app_name = 'Music'
+                elif 'photos' in query_lower:
+                    app_name = 'Photos'
             
             # Focus the correct application before shortcuts
             if browser_type:

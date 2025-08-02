@@ -27,7 +27,19 @@ class ScreenshotTool(BaseTool):
     
     def _get_detailed_description(self) -> str:
         """Get detailed description with examples for screenshot operations."""
-        return """Capture screenshots of the screen or specific applications for visual analysis and automation workflows.
+        return """📸 STANDALONE SCREENSHOT TOOL
+Capture screenshots of the screen or specific applications when you need ONLY screenshots without analysis.
+
+⚠️  NOTE: For automation workflows, use VisualAnalysisTool instead - it automatically takes fresh screenshots AND analyzes them.
+
+🎯 USE THIS TOOL WHEN:
+- You need standalone screenshots for documentation
+- Creating screenshot archives or comparisons
+- Taking screenshots for external tools
+- Custom screenshot requirements (specific regions, formats)
+
+❌ DON'T USE FOR AUTOMATION WORKFLOWS:
+- Use VisualAnalysisTool for automation (it includes fresh screenshots + analysis)
 
 SUPPORTED OPERATIONS:
 
@@ -74,11 +86,12 @@ LIMITATIONS:
 - Limited to visible screen content only
 
 WORKFLOW INTEGRATION:
-Critical first step in automation workflows:
-1. Take screenshot after navigation or page changes
-2. Pass screenshot to visual_analysis tool for element detection
-3. Use analysis results to guide click/text_input actions
-4. Repeat cycle for multi-step automation
+For standalone screenshot needs:
+1. Take screenshot for documentation or archival
+2. Use for external tools or manual analysis
+3. Create screenshot comparisons or galleries
+
+⚠️  FOR AUTOMATION: Use VisualAnalysisTool instead - it combines screenshot + analysis in one step
 
 USAGE EXAMPLES:
 - "take screenshot" → Captures full screen with timestamp

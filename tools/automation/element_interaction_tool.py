@@ -8,7 +8,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementNotInteractableException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementNotInteractableException, StaleElementReferenceException
 from ..base_tool import BaseTool, ToolResult
 from .browser_session import browser_session
 from .window_manager import window_manager
@@ -206,18 +206,22 @@ Use with element_discovery tool to:
                     error="No active browser session found. Please open a browser first using unified_browser tool."
                 )
             
-            # Parse action from kwargs or query
-            action = kwargs.get('action')
-            if not action:
-                # Try to parse from query if it's JSON-like
-                import json
+            # Handle case where parameters are passed as JSON string in query (for LLM agents)
+            if not kwargs and query.strip().startswith('{') and query.strip().endswith('}'):
                 try:
-                    if query.strip().startswith('{'):
-                        parsed = json.loads(query)
-                        action = parsed.get('action')
-                        kwargs.update(parsed)
-                except:
-                    pass
+                    import json
+                    parsed_params = json.loads(query)
+                    if isinstance(parsed_params, dict):
+                        kwargs = parsed_params
+                        query = kwargs.pop('query', '')  # Extract query if present
+                        print(f"🔧 ElementInteractionTool: Parsed JSON from query parameter")
+                        print(f"  new query: '{query}'")
+                        print(f"  new kwargs: {kwargs}")
+                except (json.JSONDecodeError, ValueError) as e:
+                    print(f"Failed to parse query as JSON: {e}")
+            
+            # Parse action from kwargs
+            action = kwargs.get('action')
             
             if not action:
                 return ToolResult(
@@ -295,7 +299,7 @@ Use with element_discovery tool to:
 
     
     async def _click_element(self, query: str, kwargs: Dict[str, Any]) -> ToolResult:
-        """Click on an element."""
+        """Click on an element with robust stale element handling."""
         try:
             selector = kwargs.get('selector', None)
             
@@ -306,48 +310,96 @@ Use with element_discovery tool to:
                     error="Selector parameter is required. Use: {'action': 'click', 'selector': '#element-id'}"
                 )
             
-            element = self._find_element_by_selector(selector)
+            # Find and validate element with retry mechanism
+            element, error_msg = self._find_and_validate_element(selector, "click")
             if not element:
                 return ToolResult(
                     success=False,
                     data=None,
-                    error=f"Element not found with selector: {selector}. Use element_discovery tool to find correct selector."
+                    error=error_msg
                 )
             
-            # Check if element is clickable
-            if not element.is_enabled():
-                return ToolResult(
-                    success=False,
-                    data=None,
-                    error=f"Element is not enabled/clickable: {selector}"
-                )
-            
-            # Scroll element into view
-            self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
-            time.sleep(0.5)
-            
-            # Wait for element to be clickable
-            clickable_element = self.wait.until(EC.element_to_be_clickable(element))
-            clickable_element.click()
-            
-            return ToolResult(
-                success=True,
-                data={
-                    "action": "click",
-                    "selector": selector,
-                    "element_tag": element.tag_name,
-                    "element_text": element.text[:100] if element.text else "",
-                    "current_url": self.driver.current_url
-                },
-                metadata={"action": "click_element"}
-            )
-            
-        except ElementNotInteractableException:
+            # Perform click with stale element retry
+            max_click_retries = 3
+            for attempt in range(max_click_retries):
+                try:
+                    # Scroll element into view
+                    self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                    time.sleep(0.3)
+                    
+                    # Double-check element is still valid before clicking
+                    is_valid, validation_error = self._validate_element_for_interaction(element, "click")
+                    if not is_valid:
+                        if "stale" in validation_error.lower() and attempt < max_click_retries - 1:
+                            # Re-find element if it became stale
+                            element, error_msg = self._find_and_validate_element(selector, "click")
+                            if not element:
+                                return ToolResult(
+                                    success=False,
+                                    data=None,
+                                    error=f"Element became stale and could not be re-found: {error_msg}"
+                                )
+                            continue
+                        else:
+                            return ToolResult(
+                                success=False,
+                                data=None,
+                                error=validation_error
+                            )
+                    
+                    # Wait for element to be clickable and click
+                    clickable_element = self.wait.until(EC.element_to_be_clickable(element))
+                    clickable_element.click()
+                    
+                    # Success - get element info for response
+                    element_tag = element.tag_name
+                    element_text = element.text[:100] if element.text else ""
+                    
+                    return ToolResult(
+                        success=True,
+                        data={
+                            "action": "click",
+                            "selector": selector,
+                            "element_tag": element_tag,
+                            "element_text": element_text,
+                            "current_url": self.driver.current_url,
+                            "attempts": attempt + 1
+                        },
+                        metadata={"action": "click_element"}
+                    )
+                    
+                except StaleElementReferenceException:
+                    if attempt < max_click_retries - 1:
+                        # Re-find element and retry
+                        element, error_msg = self._find_and_validate_element(selector, "click")
+                        if not element:
+                            return ToolResult(
+                                success=False,
+                                data=None,
+                                error=f"Element became stale and could not be re-found: {error_msg}"
+                            )
+                        time.sleep(0.5)
+                        continue
+                    else:
+                        return ToolResult(
+                            success=False,
+                            data=None,
+                            error=f"Element remained stale after {max_click_retries} attempts: {selector}"
+                        )
+                        
+                except ElementNotInteractableException:
+                    return ToolResult(
+                        success=False,
+                        data=None,
+                        error=f"Element exists but is not interactable: {selector}. It might be hidden or covered by another element."
+                    )
+                    
             return ToolResult(
                 success=False,
                 data=None,
-                error=f"Element exists but is not interactable: {selector}. It might be hidden or covered by another element."
+                error=f"Failed to click element after {max_click_retries} attempts: {selector}"
             )
+            
         except Exception as e:
             return ToolResult(
                 success=False,
@@ -356,7 +408,7 @@ Use with element_discovery tool to:
             )
     
     async def _type_text(self, query: str, kwargs: Dict[str, Any]) -> ToolResult:
-        """Type text in an element."""
+        """Type text in an element with robust stale element handling."""
         try:
             selector = kwargs.get('selector', None)
             text = kwargs.get('text', None)
@@ -375,41 +427,87 @@ Use with element_discovery tool to:
                     error="Text parameter is required. Use: {'action': 'type_text', 'selector': '#element-id', 'text': 'your text'}"
                 )
             
-            element = self._find_element_by_selector(selector)
+            # Find and validate element with retry mechanism
+            element, error_msg = self._find_and_validate_element(selector, "type_text")
             if not element:
                 return ToolResult(
                     success=False,
                     data=None,
-                    error=f"Element not found with selector: {selector}. Use element_discovery tool to find correct selector."
+                    error=error_msg
                 )
             
-            # Check if element can receive text input
-            if element.tag_name not in ['input', 'textarea'] and not element.get_attribute('contenteditable'):
-                return ToolResult(
-                    success=False,
-                    data=None,
-                    error=f"Element is not a text input field: {selector} (tag: {element.tag_name})"
-                )
-            
-            # Scroll element into view and focus
-            self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
-            time.sleep(0.5)
-            element.click()  # Focus the element
-            
-            # Type the text
-            element.send_keys(text)
-            
+            # Perform text input with stale element retry
+            max_type_retries = 3
+            for attempt in range(max_type_retries):
+                try:
+                    # Double-check element is still valid before typing
+                    is_valid, validation_error = self._validate_element_for_interaction(element, "type_text")
+                    if not is_valid:
+                        if "stale" in validation_error.lower() and attempt < max_type_retries - 1:
+                            # Re-find element if it became stale
+                            element, error_msg = self._find_and_validate_element(selector, "type_text")
+                            if not element:
+                                return ToolResult(
+                                    success=False,
+                                    data=None,
+                                    error=f"Element became stale and could not be re-found: {error_msg}"
+                                )
+                            continue
+                        else:
+                            return ToolResult(
+                                success=False,
+                                data=None,
+                                error=validation_error
+                            )
+                    
+                    # Scroll element into view and focus
+                    self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                    time.sleep(0.3)
+                    element.click()  # Focus the element
+                    
+                    # Type the text
+                    element.send_keys(text)
+                    
+                    # Get current value for response
+                    current_value = element.get_attribute('value') if element.tag_name == 'input' else element.text
+                    
+                    return ToolResult(
+                        success=True,
+                        data={
+                            "action": "type_text",
+                            "selector": selector,
+                            "text_typed": text,
+                            "element_tag": element.tag_name,
+                            "current_value": current_value,
+                            "current_url": self.driver.current_url,
+                            "attempts": attempt + 1
+                        },
+                        metadata={"action": "type_text"}
+                    )
+                    
+                except StaleElementReferenceException:
+                    if attempt < max_type_retries - 1:
+                        # Re-find element and retry
+                        element, error_msg = self._find_and_validate_element(selector, "type_text")
+                        if not element:
+                            return ToolResult(
+                                success=False,
+                                data=None,
+                                error=f"Element became stale and could not be re-found: {error_msg}"
+                            )
+                        time.sleep(0.5)
+                        continue
+                    else:
+                        return ToolResult(
+                            success=False,
+                            data=None,
+                            error=f"Element remained stale after {max_type_retries} attempts: {selector}"
+                        )
+                        
             return ToolResult(
-                success=True,
-                data={
-                    "action": "type_text",
-                    "selector": selector,
-                    "text_typed": text,
-                    "element_tag": element.tag_name,
-                    "current_value": element.get_attribute('value') if element.tag_name == 'input' else element.text,
-                    "current_url": self.driver.current_url
-                },
-                metadata={"action": "type_text"}
+                success=False,
+                data=None,
+                error=f"Failed to type text after {max_type_retries} attempts: {selector}"
             )
             
         except Exception as e:
@@ -420,7 +518,7 @@ Use with element_discovery tool to:
             )
     
     async def _clear_and_type(self, query: str, kwargs: Dict[str, Any]) -> ToolResult:
-        """Clear element and type new text."""
+        """Clear element and type new text with robust stale element handling."""
         try:
             selector = kwargs.get('selector', None)
             text = kwargs.get('text', None)
@@ -437,33 +535,87 @@ Use with element_discovery tool to:
                     error="Both selector and text are required"
                 )
             
-            element = self._find_element_by_selector(selector)
+            # Find and validate element with retry mechanism
+            element, error_msg = self._find_and_validate_element(selector, "clear_and_type")
             if not element:
                 return ToolResult(
                     success=False,
                     data=None,
-                    error=f"Element not found with selector: {selector}"
+                    error=error_msg
                 )
             
-            # Scroll element into view and focus
-            self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
-            time.sleep(0.5)
-            element.click()
-            
-            # Clear existing text and type new text
-            element.clear()
-            element.send_keys(text)
-            
+            # Perform clear and type with stale element retry
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    # Double-check element is still valid
+                    is_valid, validation_error = self._validate_element_for_interaction(element, "clear_and_type")
+                    if not is_valid:
+                        if "stale" in validation_error.lower() and attempt < max_retries - 1:
+                            # Re-find element if it became stale
+                            element, error_msg = self._find_and_validate_element(selector, "clear_and_type")
+                            if not element:
+                                return ToolResult(
+                                    success=False,
+                                    data=None,
+                                    error=f"Element became stale and could not be re-found: {error_msg}"
+                                )
+                            continue
+                        else:
+                            return ToolResult(
+                                success=False,
+                                data=None,
+                                error=validation_error
+                            )
+                    
+                    # Scroll element into view and focus
+                    self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                    time.sleep(0.3)
+                    element.click()
+                    
+                    # Clear existing text and type new text
+                    element.clear()
+                    element.send_keys(text)
+                    
+                    # Get current value for response
+                    current_value = element.get_attribute('value') if element.tag_name == 'input' else element.text
+                    
+                    return ToolResult(
+                        success=True,
+                        data={
+                            "action": "clear_and_type",
+                            "selector": selector,
+                            "text_typed": text,
+                            "current_value": current_value,
+                            "current_url": self.driver.current_url,
+                            "attempts": attempt + 1
+                        },
+                        metadata={"action": "clear_and_type"}
+                    )
+                    
+                except StaleElementReferenceException:
+                    if attempt < max_retries - 1:
+                        # Re-find element and retry
+                        element, error_msg = self._find_and_validate_element(selector, "clear_and_type")
+                        if not element:
+                            return ToolResult(
+                                success=False,
+                                data=None,
+                                error=f"Element became stale and could not be re-found: {error_msg}"
+                            )
+                        time.sleep(0.5)
+                        continue
+                    else:
+                        return ToolResult(
+                            success=False,
+                            data=None,
+                            error=f"Element remained stale after {max_retries} attempts: {selector}"
+                        )
+                        
             return ToolResult(
-                success=True,
-                data={
-                    "action": "clear_and_type",
-                    "selector": selector,
-                    "text_typed": text,
-                    "current_value": element.get_attribute('value') if element.tag_name == 'input' else element.text,
-                    "current_url": self.driver.current_url
-                },
-                metadata={"action": "clear_and_type"}
+                success=False,
+                data=None,
+                error=f"Failed to clear and type after {max_retries} attempts: {selector}"
             )
             
         except Exception as e:
@@ -594,6 +746,112 @@ Use with element_discovery tool to:
             
         except Exception:
             return None
+    
+    def _is_element_stale(self, element) -> bool:
+        """Check if an element is stale (no longer attached to DOM)."""
+        try:
+            # Try to access a property - this will raise StaleElementReferenceException if stale
+            _ = element.is_enabled()
+            return False
+        except StaleElementReferenceException:
+            return True
+        except Exception:
+            # Other exceptions might indicate the element is problematic
+            return True
+    
+    def _validate_element_for_interaction(self, element, interaction_type: str = "click") -> tuple[bool, str]:
+        """
+        Validate if element is ready for interaction.
+        
+        Args:
+            element: WebElement to validate
+            interaction_type: Type of interaction (click, type, etc.)
+            
+        Returns:
+            tuple: (is_valid, error_message)
+        """
+        try:
+            # Check if element is stale
+            if self._is_element_stale(element):
+                return False, "Element is stale (no longer attached to DOM)"
+            
+            # Check if element is displayed
+            if not element.is_displayed():
+                return False, "Element is not visible on the page"
+            
+            # Check if element is enabled
+            if not element.is_enabled():
+                return False, "Element is not enabled/interactable"
+            
+            # Additional checks based on interaction type
+            if interaction_type in ["click", "right_click", "double_click"]:
+                # For click interactions, check if element is clickable
+                try:
+                    # Try to get element location - this can fail if element is not interactable
+                    location = element.location
+                    size = element.size
+                    if location['x'] < 0 or location['y'] < 0 or size['width'] <= 0 or size['height'] <= 0:
+                        return False, "Element has invalid dimensions or position"
+                except Exception:
+                    return False, "Element location/size cannot be determined"
+            
+            elif interaction_type in ["type_text", "clear_and_type", "append_text"]:
+                # For text input, check if element can receive text
+                tag_name = element.tag_name.lower()
+                if tag_name not in ['input', 'textarea'] and not element.get_attribute('contenteditable'):
+                    return False, f"Element is not a text input field (tag: {tag_name})"
+                
+                # Check if input is readonly
+                if element.get_attribute('readonly'):
+                    return False, "Element is readonly and cannot be modified"
+            
+            return True, ""
+            
+        except StaleElementReferenceException:
+            return False, "Element became stale during validation"
+        except Exception as e:
+            return False, f"Element validation failed: {str(e)}"
+    
+    def _find_and_validate_element(self, selector: str, interaction_type: str = "click", max_retries: int = 3):
+        """
+        Find element and validate it for interaction with retry mechanism for stale elements.
+        
+        Args:
+            selector: Element selector
+            interaction_type: Type of interaction to validate for
+            max_retries: Maximum number of retries for stale elements
+            
+        Returns:
+            tuple: (element, error_message) - element is None if failed
+        """
+        for attempt in range(max_retries):
+            try:
+                # Find the element
+                element = self._find_element_by_selector(selector)
+                if not element:
+                    return None, f"Element not found with selector: {selector}. Use element_discovery tool to find correct selector."
+                
+                # Validate element for interaction
+                is_valid, error_msg = self._validate_element_for_interaction(element, interaction_type)
+                if not is_valid:
+                    if "stale" in error_msg.lower() and attempt < max_retries - 1:
+                        # If element is stale, wait a bit and retry
+                        time.sleep(0.5)
+                        continue
+                    return None, error_msg
+                
+                return element, ""
+                
+            except StaleElementReferenceException:
+                if attempt < max_retries - 1:
+                    # Wait and retry for stale elements
+                    time.sleep(0.5)
+                    continue
+                return None, f"Element became stale after {max_retries} attempts: {selector}"
+            except Exception as e:
+                return None, f"Failed to find/validate element: {str(e)}"
+        
+        return None, f"Failed to find stable element after {max_retries} attempts: {selector}"
     
     def _extract_selector_from_query(self, query: str) -> Optional[str]:
         """Extract element selector from query."""

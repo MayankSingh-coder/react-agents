@@ -91,10 +91,10 @@ class EnhancedToolManager:
         # Add automation tools if requested
         if self.include_automation:
             automation_tools = [
-                ScreenshotTool(),
+                # ScreenshotTool(),
                 AppLauncherTool(),
                 TextInputTool(),
-                ClickTool(),
+                # ClickTool(),
                 UnifiedBrowserTool(),  # Unified browser tool with navigation and basic automation
                 ElementDiscoveryTool(),  # Advanced element discovery for web automation
                 ElementInteractionTool(),  # Precise element interaction for web automation
@@ -132,6 +132,20 @@ class EnhancedToolManager:
                 data=None,
                 error=f"Tool '{tool_name}' not found. Available tools: {', '.join(self.get_tool_names())}"
             )
+        
+        # Handle case where parameters are passed as JSON string in query (for LLM agents)
+        if not kwargs and query.strip().startswith('{') and query.strip().endswith('}'):
+            try:
+                import json
+                parsed_params = json.loads(query)
+                if isinstance(parsed_params, dict):
+                    kwargs = parsed_params
+                    query = kwargs.pop('query', '')  # Extract query if present
+                    logger.info(f"🔧 EnhancedToolManager: Parsed JSON from query for {tool_name}")
+                    logger.info(f"  new query: '{query}'")
+                    logger.info(f"  new kwargs: {kwargs}")
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Failed to parse query as JSON for {tool_name}: {e}")
         
         try:
             return await tool.execute(query, **kwargs)
