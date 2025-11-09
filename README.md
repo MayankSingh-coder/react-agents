@@ -1,4 +1,4 @@
-# Hybrid ReAct Agent Service
+# Hybrid ReAct Agent Service [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/MayankSingh-coder/react-agents)
 
 A sophisticated AI agent system that combines **ReAct (Reasoning and Acting)** and **Plan-Execute** paradigms with advanced memory management and context sharing. Built with LangGraph, LangChain, and Google Gemini for intelligent task execution and reasoning.
 
